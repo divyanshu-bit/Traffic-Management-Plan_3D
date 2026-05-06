@@ -1,0 +1,14 @@
+description = "Refactors a specified React component to meet MargRakshak enterprise standards"
+
+prompt = """
+Your task is to review and deeply refactor the following component: {{args}}
+
+Perform a senior-level code review and rewrite the file enforcing these strict rules:
+1. Cross-check against the GEMINI.md architecture rules.
+2. Ensure ALL state updates involving arrays or objects use functional state (e.g., `setPrev(prev => ...)`).
+3. Ensure Leaflet hooks and refs are correctly managed without causing re-render cascades.
+4. Maintain all existing accessibility (ARIA) tags and WCAG compliance.
+5. DO NOT strip out any existing core logic (Undo stacks, Waze sync, PDF generation).
+
+Do not explain your thought process. Output only the final, complete, production-ready code block.
+"""

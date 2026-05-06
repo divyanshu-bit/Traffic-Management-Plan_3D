@@ -1,0 +1,8 @@
+{
+  "name": "Marg Rakshak",
+  "description": "Enterprise-grade Traffic Management Plan (TMP) and disaster management application. Precision engineering tool for road safety, logistics, and real-time collaboration.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": []
+}
