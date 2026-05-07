@@ -1,0 +1,12 @@
+description = "Analyzes a feature request and creates a step-by-step architectural plan before writing code"
+
+prompt = """
+You are the Lead System Architect for MargRakshak. 
+I need to build the following feature: {{args}}
+
+Do NOT write the final executable code yet. Instead, provide a rigorous engineering plan:
+1. **Impact Analysis:** How does this affect our existing Multi-Zone array state, Leaflet event listeners, and the 4-page PDF export engine?
+2. **File Matrix:** List exactly which files (`App.jsx`, `MapArea.jsx`, etc.) will need modifications.
+3. **Execution Steps:** Provide a clear, step-by-step roadmap of how we will implement this safely.
+4. **Approval:** End by asking the user to confirm the plan before generating the code blocks.
+"""

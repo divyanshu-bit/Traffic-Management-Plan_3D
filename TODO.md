@@ -1,0 +1,7 @@
+- [x] Refactor Maparea.jsx to remove cursorPoint React state and drive draft preview via MapLibre source.setData
+- [x] Keep draftCoords as React state for click/undo/finish behavior
+- [x] Ensure mousemove throttling/RAF updates only refs and calls setData (no React re-renders)
+- [x] Clear/update draft preview source on finish/undo/cancel/activeTool changes
+- [x] Validate build and run-time draw preview + undo/cancel/rectangle auto-finish
+- [x] Optimize Snap Tool with distance-based caching (400m radius)
+- [x] Add Satellite HD road lines and native place name fallbacks
