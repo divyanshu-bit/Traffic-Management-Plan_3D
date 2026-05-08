@@ -49,6 +49,8 @@ const useStore = create((set, get) => ({
   superintendent: '',
   safetyOfficer: '',
   emergencyContact: '',
+  customLogo: null,
+  setCustomLogo: (val) => set({ customLogo: val }),
   setProjectField: (field, value) => set({ [field]: value }),
 
   // Zones State
