@@ -292,6 +292,9 @@ const MapArea = ({
         onMouseMove={handleMouseMove}
         onMove={(evt) => setZoom(evt.viewState.zoom)}
         maxPitch={75}
+        mapOptions={{
+          preserveDrawingBuffer: true
+        }}
       >
         <NavigationControl position="bottom-right" visualizePitch />
         <Source id="buildings-source" type="vector" url={`https://api.maptiler.com/tiles/v3/tiles.json?key=${MAPTILER_KEY}`} />
