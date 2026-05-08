@@ -2,6 +2,7 @@
 import React, { useState, useMemo, memo } from 'react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
+import { PlusCircle } from 'lucide-react';
 import useStore from '../store/useStore';
 
 // ─── ASSET CATALOGUE ─────────────────────────────────────────────────────────
