@@ -211,8 +211,6 @@ const MapArea = ({
     });
   }, [activeTool]);
 
-  useEffect(() => { if (mapRef.current) setMapInstance(mapRef.current.getMap()); }, [setMapInstance]);
-
   useEffect(() => {
     const clearDraftSources = () => {
       if (!mapRef.current) return;
@@ -285,6 +283,7 @@ const MapArea = ({
     <div style={{ width: '100%', height: '100%', position: 'relative', pointerEvents: isExporting ? 'none' : 'auto' }}>
       <Map
         ref={mapRef}
+        onLoad={(e) => setMapInstance(e.target)}
         initialViewState={{ longitude: 77.209, latitude: 28.6139, zoom: 16.5, pitch: 38, bearing: -12 }}
         mapStyle={`https://api.maptiler.com/maps/${MAP_STYLES[mapStyle]}/style.json?key=${MAPTILER_KEY}`}
         interactiveLayerIds={['zones-fill']}
