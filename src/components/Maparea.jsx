@@ -110,31 +110,6 @@ const MapArea = ({
     return featureFromCoords(draftCoords, toolToShapeType(activeTool), null);
   }, [draftCoords, activeTool]);
 
-  const exportAssetsGeoJSON = useMemo(() => ({
-    type: 'FeatureCollection',
-    features: zones.flatMap(z => (z.placedAssets || []).map(asset => {
-      const cfg = ASSET_CONFIG[asset.type] || { icon: MapPin, color: '#94a3b8', shape: 'circle' };
-      // Map shape to unicode symbol
-      const symbol = 
-        cfg.shape === 'circle' ? '●' :
-        cfg.shape === 'rect' ? '■' :
-        cfg.shape === 'diamond' ? '◆' :
-        cfg.shape === 'octagon' ? '⬢' :
-        cfg.shape === 'triangle' ? '▲' : '●';
-
-      return {
-        type: 'Feature',
-        geometry: { type: 'Point', coordinates: [asset.lng, asset.lat] },
-        properties: {
-          symbol,
-          color: cfg.color,
-          rotation: asset.rotation || 0,
-          size: cfg.shape === 'diamond' ? 24 : 20
-        }
-      };
-    }))
-  }), [zones]);
-
   const ensureRoadsNear = useCallback(async (lat, lng) => {
     if (!isSnapEnabled) return roadCollection;
     
@@ -376,27 +351,6 @@ const MapArea = ({
               'text-ignore-placement': true
             }} 
             paint={{ 'text-color': isSnapEnabled ? '#10b981' : '#0ea5e9', 'text-halo-color': '#fff', 'text-halo-width': 1 }} 
-          />
-        </Source>
-
-        <Source id="export-assets-source" type="geojson" data={exportAssetsGeoJSON}>
-          <Layer 
-            id="assets-export-layer" 
-            type="symbol"
-            layout={{
-              'text-field': ['get', 'symbol'],
-              'text-size': ['get', 'size'],
-              'text-font': ['Noto Sans Bold'],
-              'text-rotate': ['get', 'rotation'],
-              'text-allow-overlap': true,
-              'text-ignore-placement': true,
-              'text-padding': 0
-            }}
-            paint={{
-              'text-color': ['get', 'color'],
-              'text-halo-color': '#ffffff',
-              'text-halo-width': 2
-            }}
           />
         </Source>
 

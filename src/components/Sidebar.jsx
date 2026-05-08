@@ -416,8 +416,15 @@ const Sidebar = ({
             
             // Force a repaint and capture during the render event to ensure the WebGL buffer is populated
             return await new Promise(resolve => {
-              mapInstance.once('render', () => {
-                resolve(mapInstance.getCanvas().toDataURL('image/jpeg', 0.9));
+              mapInstance.once('render', async () => {
+                try {
+                  const container = mapInstance.getContainer();
+                  const canvas = await html2canvas(container, { useCORS: true, logging: false, scale: 2 });
+                  resolve(canvas.toDataURL('image/jpeg', 0.9));
+                } catch(err) {
+                  console.warn('html2canvas failed, falling back to WebGL canvas', err);
+                  resolve(mapInstance.getCanvas().toDataURL('image/jpeg', 0.9));
+                }
               });
               mapInstance.triggerRepaint();
             });
