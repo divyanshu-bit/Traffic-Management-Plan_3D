@@ -66,8 +66,10 @@ const MapArea = ({
 }) => {
   const isExporting = useStore(state => state.isExporting);
   const setMapInstance = useStore(state => state.setMapInstance);
+  const mapStyle = useStore(state => state.mapStyle);
+  const setMapStyle = useStore(state => state.setMapStyle);
+
   const mapRef = useRef(null);
-  const [mapStyle, setMapStyle] = useState('satellite');
   const [draftCoords, setDraftCoords] = useState([]);
   const [clickPing, setClickPing] = useState(null); // Added clickPing
   const [zoom, setZoom] = useState(16.5);

@@ -141,6 +141,9 @@ const Sidebar = ({
       return;
     }
     setIsExporting(true);
+    const originalStyle = useStore.getState().mapStyle;
+    const setMapStyle = useStore.getState().setMapStyle;
+
     const originalView = {
       center: mapInstance.getCenter(),
       zoom: mapInstance.getZoom(),
@@ -149,6 +152,8 @@ const Sidebar = ({
     };
 
     const pdf = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
+      // ... rest of PDF setup ...
+
     const W=pdf.internal.pageSize.getWidth(), H=pdf.internal.pageSize.getHeight(), M=14, UW=W-M*2;
     const now=new Date();
     const dateStr=now.toLocaleDateString('en-IN',{day:'2-digit',month:'long',year:'numeric'});
@@ -383,10 +388,14 @@ const Sidebar = ({
       T(`Speed: ${zone.speedLimit}km/h  ·  WZ Speed: ${zone.workZoneSpeed}km/h  ·  Lanes: ${zone.laneCount}×${zone.laneWidth}m  ·  Surface: ${zone.surfaceType}  ·  Closure: ${zone.closureType}  ·  Spacing: ${zsp.coneSpacing}`,M+4,curY+6);
       curY+=14;
 
-      curY=secHead('SITE MAP  —  AERIAL VIEW',curY);
+      curY=secHead('SITE MAP  —  AERIAL VIEWS',curY);
       if(mapInstance){
         try{
-          const captureView = async (pitch, bearing, zoomLevel) => {
+          const captureView = async (pitch, bearing, zoomLevel, forcedStyle = null) => {
+            if (forcedStyle) {
+              setMapStyle(forcedStyle);
+              await new Promise(r => setTimeout(r, 2000)); // Buffer for style change
+            }
             if (zone.coords.length > 0) {
               const lngs = zone.coords.map(c => c.lng);
               const lats = zone.coords.map(c => c.lat);
@@ -414,20 +423,27 @@ const Sidebar = ({
             });
           };
 
-          // Capture 3 views
-          const imgTop = await captureView(0, 0);
-          const imgIso = await captureView(60, 45, 17.5);
-          const imgApp = await captureView(75, -15, 18.5);
+          // Capture 4 views
+          const imgDark = await captureView(0, 0, null, 'dark');
+          const imgSat  = await captureView(0, 0, null, 'satellite');
+          const imgIso  = await captureView(60, 45, 17.5);
+          const imgApp  = await captureView(75, -15, 18.5);
           
-          const mapH = 80;
-          S(...C.accent); LW(0.5); RR(M-1, curY-1, UW+2, mapH+2, 2, 'D');
-          pdf.addImage(imgTop, 'JPEG', M, curY, UW, mapH);
+          const mainW = (UW - 4) / 2;
+          const mainH = 65;
           
-          if(zStats){
-            TC(...C.tDim);FN();FS(6);
-            T(`Centroid: ${zStats.center.lat.toFixed(6)}°N, ${zStats.center.lng.toFixed(6)}°E  ·  ${zStats.isPath?'Length':'Perimeter'}: ${fmtDist(zStats.perim)}${zStats.isPath?'':`  ·  Area: ${fmtArea(zStats.area)}`}`,W/2,curY+mapH+5,{align:'center'});
-          }
-          curY += mapH + 12;
+          S(...C.accent); LW(0.4); 
+          RR(M-1, curY-1, mainW+2, mainH+2, 1, 'D');
+          pdf.addImage(imgDark, 'JPEG', M, curY, mainW, mainH);
+          
+          RR(M + mainW + 3, curY-1, mainW+2, mainH+2, 1, 'D');
+          pdf.addImage(imgSat, 'JPEG', M + mainW + 4, curY, mainW, mainH);
+          
+          TC(...C.tDim); FN(); FS(5);
+          T('AERIAL: DARK PLAN', M + mainW/2, curY + mainH + 4, {align:'center'});
+          T('AERIAL: SATELLITE HD', M + mainW + 4 + mainW/2, curY + mainH + 4, {align:'center'});
+          
+          curY += mainH + 10;
 
           curY = secHead('SITE MAP  —  PERSPECTIVE VIEWS (3D)', curY);
           const subW = (UW - 6) / 2;
@@ -554,8 +570,9 @@ const Sidebar = ({
     FB();T(`Report: ${reportId}  ·  ${dateStr}, ${timeStr}`,W-M,H-10,{align:'right'});
     T(`Page ${pageNum} of ${totalPagesEst}`,W-M,H-5.5,{align:'right'});
 
-    // Restore view
-    mapInstance.jumpTo(originalView);
+    // Restore view & style
+    setMapStyle(originalStyle);
+    mapInstance.jumpTo({ ...originalView, animate: false });
     setIsExporting(false);
 
     pdf.save(`MargRakshak_TMP_${reportId}.pdf`);
