@@ -404,7 +404,14 @@ const Sidebar = ({
                 setTimeout(r, 1200); 
               });
             }
-            return mapInstance.getCanvas().toDataURL('image/jpeg', 0.9);
+            
+            // Force a repaint and capture during the render event to ensure the WebGL buffer is populated
+            return await new Promise(resolve => {
+              mapInstance.once('render', () => {
+                resolve(mapInstance.getCanvas().toDataURL('image/jpeg', 0.9));
+              });
+              mapInstance.triggerRepaint();
+            });
           };
 
           // Capture 3 views
