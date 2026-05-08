@@ -254,12 +254,16 @@ const Sidebar = ({
       const lx = M + (i % 2) * (UW / 2);
       const ly = curY + Math.floor(i / 2) * 8;
       F(...item.color);
-      if (item.shape === 'circle') pdf.circle(lx + 3, ly + 2.5, 2.2, 'F');
-      else if (item.shape === 'rect') pdf.rect(lx + 1, ly + 0.5, 4, 4, 'F');
-      else if (item.shape === 'diamond') {
-        pdf.lines([[2, 0], [4, 2], [2, 4], [0, 2]], lx + 1, ly + 0.5, [1, 1], 'F', true);
+      if (item.shape === 'circle') {
+        pdf.circle(lx + 4, ly + 2.5, 2.2, 'F');
+      } else if (item.shape === 'rect') {
+        pdf.rect(lx + 2, ly + 0.5, 4, 4, 'F');
+      } else if (item.shape === 'diamond') {
+        // Draw diamond explicitly using two triangles to avoid scaling issues
+        pdf.triangle(lx + 4, ly, lx + 2, ly + 2.5, lx + 6, ly + 2.5, 'F');
+        pdf.triangle(lx + 4, ly + 5, lx + 2, ly + 2.5, lx + 6, ly + 2.5, 'F');
       }
-      TC(...C.tMain); FN(); FS(6); T(item.label, lx + 8, ly + 3.5);
+      TC(...C.tMain); FN(); FS(6); T(item.label, lx + 10, ly + 3.5);
     });
     curY += 20;
 
