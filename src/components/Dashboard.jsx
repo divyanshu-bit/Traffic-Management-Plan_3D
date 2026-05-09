@@ -1,18 +1,18 @@
 import React, { useState, useRef, useCallback, useEffect, Component } from 'react';
 import * as turf from '@turf/turf';
 
-import './App.css';
-import useStore from './store/useStore';
+import './Dashboard.css';
+import useStore from '../store/useStore';
 
-import MapArea from './components/Maparea';
-import Sidebar from './components/Sidebar';
-import FloatingDock from './components/FloatingDock';
+import MapArea from './Maparea';
+import Sidebar from './Sidebar';
+import FloatingDock from './FloatingDock';
 
 const MemoizedMapArea = React.memo(MapArea);
 const MemoizedSidebar = React.memo(Sidebar);
 const MemoizedFloatingDock = React.memo(FloatingDock);
-import OnboardingOverlay from './components/OnboardingOverlay';
-import { snapToRoads, fetchRoadVectors } from './utils/geoSnap';
+import OnboardingOverlay from './OnboardingOverlay';
+import { snapToRoads, fetchRoadVectors } from '../utils/geoSnap';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
