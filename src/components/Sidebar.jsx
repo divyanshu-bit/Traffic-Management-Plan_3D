@@ -2,6 +2,7 @@
 import React, { useState, useMemo, memo } from 'react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
+import { PlusCircle } from 'lucide-react';
 import useStore from '../store/useStore';
 
 import { useMRAuth } from '../hooks/useMRAuth';
@@ -92,10 +93,19 @@ const Sidebar = ({
     isWazeSync, setIsWazeSync,
     projectName, setProjectField, permitNumber, contractorName, clientName,
     startDate, endDate, superintendent, safetyOfficer, emergencyContact,
+    customLogo, setCustomLogo,
     isGenerating, genProgress, saveStatus,
     isExporting, setIsExporting,
     mapInstance
   } = useStore();
+
+  const handleLogoChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => setCustomLogo(event.target.result);
+    reader.readAsDataURL(file);
+  };
 
   const [exportError,  setExportError]  = useState(null);
   const [activePhase,  setActivePhase]  = useState(1);
@@ -137,6 +147,9 @@ const Sidebar = ({
       return;
     }
     setIsExporting(true);
+    const originalStyle = useStore.getState().mapStyle;
+    const setMapStyle = useStore.getState().setMapStyle;
+
     const originalView = {
       center: mapInstance.getCenter(),
       zoom: mapInstance.getZoom(),
@@ -145,6 +158,8 @@ const Sidebar = ({
     };
 
     const pdf = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
+      // ... rest of PDF setup ...
+
     const W=pdf.internal.pageSize.getWidth(), H=pdf.internal.pageSize.getHeight(), M=14, UW=W-M*2;
     const now=new Date();
     const dateStr=now.toLocaleDateString('en-IN',{day:'2-digit',month:'long',year:'numeric'});
@@ -188,6 +203,16 @@ const Sidebar = ({
     F(...C.accent);R(0,0,W,52);F(...C.accentDk);R(0,32,W,20);
     TC(...C.white);FB();FS(15);T('MARG RAKSHAK',M,17);
     TC(210,240,255);FN();FS(7.5);T('Intelligent Traffic Management Platform',M,23);
+
+    if (customLogo) {
+      try {
+        // Render custom logo in the top right header area
+        pdf.addImage(customLogo, 'PNG', W - M - 30, 8, 30, 15);
+      } catch (e) {
+        console.warn('Failed to add custom logo to PDF', e);
+      }
+    }
+
     F(...C.bg);R(0,52,W,H-52);
     TC(...C.white);FB();
     if(projectName){FS(11);T(projectName.toUpperCase(),M,41);FS(20);T('TRAFFIC MANAGEMENT',M,56);T('PLAN',M,67);}
@@ -224,6 +249,34 @@ const Sidebar = ({
       curY+=11;
     }
     curY+=5;
+
+    // ── PAGE 1.5: MAP LEGEND ────────────────────────────────────────────────
+    F(...C.surf2);RR(M,curY,UW,7,2,'F');
+    TC(...C.accent);FB();FS(6.5);T('MAP LEGEND',M+4,curY+5);curY+=10;
+    
+    const legendItems = [
+      { label: 'Traffic Cone', color: [255, 77, 0], shape: 'circle' },
+      { label: 'Barrier / Board', color: [239, 68, 68], shape: 'rect' },
+      { label: 'TMA Truck', color: [250, 204, 21], shape: 'rect' },
+      { label: 'Sign / Signal', color: [250, 204, 21], shape: 'diamond' },
+    ];
+
+    legendItems.forEach((item, i) => {
+      const lx = M + (i % 2) * (UW / 2);
+      const ly = curY + Math.floor(i / 2) * 8;
+      F(...item.color);
+      if (item.shape === 'circle') {
+        pdf.circle(lx + 4, ly + 2.5, 2.2, 'F');
+      } else if (item.shape === 'rect') {
+        pdf.rect(lx + 2, ly + 0.5, 4, 4, 'F');
+      } else if (item.shape === 'diamond') {
+        // Draw diamond explicitly using two triangles to avoid scaling issues
+        pdf.triangle(lx + 4, ly, lx + 2, ly + 2.5, lx + 6, ly + 2.5, 'F');
+        pdf.triangle(lx + 4, ly + 5, lx + 2, ly + 2.5, lx + 6, ly + 2.5, 'F');
+      }
+      TC(...C.tMain); FN(); FS(6); T(item.label, lx + 10, ly + 3.5);
+    });
+    curY += 20;
 
     // Zone index table
     F(...C.surf2);RR(M,curY,UW,7,2,'F');
@@ -341,45 +394,91 @@ const Sidebar = ({
       T(`Speed: ${zone.speedLimit}km/h  ·  WZ Speed: ${zone.workZoneSpeed}km/h  ·  Lanes: ${zone.laneCount}×${zone.laneWidth}m  ·  Surface: ${zone.surfaceType}  ·  Closure: ${zone.closureType}  ·  Spacing: ${zsp.coneSpacing}`,M+4,curY+6);
       curY+=14;
 
-      curY=secHead('SITE MAP  —  AERIAL VIEW',curY);
+      curY=secHead('SITE MAP  —  AERIAL VIEWS',curY);
       if(mapInstance){
         try{
-          // Focus map on zone
-          if (zone.coords.length > 0) {
-            const lngs = zone.coords.map(c => c.lng);
-            const lats = zone.coords.map(c => c.lat);
-            const bounds = [
-              [Math.min(...lngs), Math.min(...lats)],
-              [Math.max(...lngs), Math.max(...lats)]
-            ];
-            mapInstance.fitBounds(bounds, { padding: 60, animate: false });
-            // Wait for render
-            await new Promise(r => {
-              mapInstance.once('idle', r);
-              setTimeout(r, 1000); 
-            });
-          }
+          const captureView = async (pitch, bearing, zoomLevel, forcedStyle = null) => {
+            if (forcedStyle) {
+              setMapStyle(forcedStyle);
+              await new Promise(r => setTimeout(r, 2000)); // Buffer for style change
+            }
+            if (zone.coords.length > 0) {
+              const lngs = zone.coords.map(c => c.lng);
+              const lats = zone.coords.map(c => c.lat);
+              const center = { lat: lats.reduce((a,b)=>a+b)/lats.length, lng: lngs.reduce((a,b)=>a+b)/lngs.length };
+              
+              if (pitch === 0) {
+                const bounds = [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]];
+                mapInstance.fitBounds(bounds, { padding: 60, animate: false });
+              } else {
+                mapInstance.jumpTo({ center, zoom: zoomLevel || 17.5, pitch, bearing, animate: false });
+              }
 
-          // Capture the entire map container using html2canvas to include DOM markers
-          const mapContainer = mapInstance.getContainer();
-          const canvas = await html2canvas(mapContainer, {
-            useCORS: true,
-            allowTaint: true,
-            backgroundColor: null,
-            logging: false
-          });
-          const img = canvas.toDataURL('image/jpeg', 0.95);
+              await new Promise(r => {
+                mapInstance.once('idle', r);
+                setTimeout(r, 1200); 
+              });
+            }
+            
+            // Force a repaint and capture during the render event to ensure the WebGL buffer is populated
+            return await new Promise(resolve => {
+              mapInstance.once('render', async () => {
+                try {
+                  const container = mapInstance.getContainer();
+                  const canvas = await html2canvas(container, { 
+                    useCORS: true, 
+                    logging: false, 
+                    scale: 2,
+                    backgroundColor: null
+                  });
+                  resolve(canvas.toDataURL('image/jpeg', 0.9));
+                } catch(err) {
+                  console.warn('html2canvas failed, falling back to WebGL canvas', err);
+                  resolve(mapInstance.getCanvas().toDataURL('image/jpeg', 0.9));
+                }
+              });
+              mapInstance.triggerRepaint();
+            });
+          };
+
+          // Capture 4 views
+          const imgDark = await captureView(0, 0, null, 'dark');
+          const imgSat  = await captureView(0, 0, null, 'satellite');
+          const imgIso  = await captureView(60, 45, 17.5);
+          const imgApp  = await captureView(75, -15, 18.5);
           
-          const aspect = canvas.height / canvas.width;
-          const mapH = Math.min(H - curY - 28, aspect * UW);
+          const mainW = (UW - 4) / 2;
+          const mainH = 65;
           
-          S(...C.accent); LW(0.5); RR(M-1, curY-1, UW+2, mapH+2, 2, 'D');
-          pdf.addImage(img, 'JPEG', M, curY, UW, mapH);
+          S(...C.accent); LW(0.4); 
+          RR(M-1, curY-1, mainW+2, mainH+2, 1, 'D');
+          pdf.addImage(imgDark, 'JPEG', M, curY, mainW, mainH);
           
-          if(zStats){
-            TC(...C.tDim);FN();FS(6);
-            T(`Centroid: ${zStats.center.lat.toFixed(6)}°N, ${zStats.center.lng.toFixed(6)}°E  ·  ${zStats.isPath?'Length':'Perimeter'}: ${fmtDist(zStats.perim)}${zStats.isPath?'':`  ·  Area: ${fmtArea(zStats.area)}`}`,W/2,curY+mapH+5,{align:'center'});
-          }
+          RR(M + mainW + 3, curY-1, mainW+2, mainH+2, 1, 'D');
+          pdf.addImage(imgSat, 'JPEG', M + mainW + 4, curY, mainW, mainH);
+          
+          TC(...C.tDim); FN(); FS(5);
+          T('AERIAL: DARK PLAN', M + mainW/2, curY + mainH + 4, {align:'center'});
+          T('AERIAL: SATELLITE HD', M + mainW + 4 + mainW/2, curY + mainH + 4, {align:'center'});
+          
+          curY += mainH + 10;
+
+          curY = secHead('SITE MAP  —  PERSPECTIVE VIEWS (3D)', curY);
+          const subW = (UW - 6) / 2;
+          const subH = 50;
+          
+          S(...C.accent); LW(0.3); 
+          RR(M-1, curY-1, subW+2, subH+2, 2, 'D');
+          pdf.addImage(imgIso, 'JPEG', M, curY, subW, subH);
+          
+          RR(M + subW + 5, curY-1, subW+2, subH+2, 2, 'D');
+          pdf.addImage(imgApp, 'JPEG', M + subW + 6, curY, subW, subH);
+          
+          TC(...C.tDim); FN(); FS(5.5);
+          T('3D ISOMETRIC (AERIAL)', M + subW/2, curY + subH + 5, {align:'center'});
+          T('DRIVER APPROACH (GROUND)', M + subW + 6 + subW/2, curY + subH + 5, {align:'center'});
+          
+          curY += subH + 12;
         }catch(e){
           TC(...C.tFaint);FN();FS(8);T('Map capture unavailable',W/2,curY+30,{align:'center'});
         }
@@ -489,8 +588,9 @@ const Sidebar = ({
     FB();T(`Report: ${reportId}  ·  ${dateStr}, ${timeStr}`,W-M,H-10,{align:'right'});
     T(`Page ${pageNum} of ${totalPagesEst}`,W-M,H-5.5,{align:'right'});
 
-    // Restore view
-    mapInstance.jumpTo(originalView);
+    // Restore view & style
+    setMapStyle(originalStyle);
+    mapInstance.jumpTo({ ...originalView, animate: false });
     setIsExporting(false);
 
     pdf.save(`MargRakshak_TMP_${reportId}.pdf`);
@@ -708,6 +808,31 @@ const Sidebar = ({
               </Field>
               <Field id="emergency-contact" label="Emergency Contact">
                 <Input id="emergency-contact" type="tel" value={emergencyContact} onChange={setP('emergencyContact')} placeholder="+91"/>
+              </Field>
+
+              <Field id="company-logo" label="Company Logo">
+                <div className="logo-upload-container">
+                  <input 
+                    type="file" 
+                    id="logo-upload" 
+                    accept="image/png, image/jpeg" 
+                    onChange={handleLogoChange}
+                    className="hidden-file-input"
+                  />
+                  <label htmlFor="logo-upload" className="logo-upload-label">
+                    {customLogo ? (
+                      <div className="logo-preview-box">
+                        <img src={customLogo} alt="Logo" className="logo-preview-img" />
+                        <span className="logo-change-text">Change Logo</span>
+                      </div>
+                    ) : (
+                      <div className="logo-placeholder">
+                        <PlusCircle size={20} />
+                        <span>Upload Logo</span>
+                      </div>
+                    )}
+                  </label>
+                </div>
               </Field>
             </div>
           )}

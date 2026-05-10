@@ -49,6 +49,8 @@ const useStore = create((set, get) => ({
   superintendent: '',
   safetyOfficer: '',
   emergencyContact: '',
+  customLogo: null,
+  setCustomLogo: (val) => set({ customLogo: val }),
   setProjectField: (field, value) => set({ [field]: value }),
 
   // Zones State
@@ -139,10 +141,6 @@ const useStore = create((set, get) => ({
   isExporting: false,
   setIsExporting: (val) => set({ isExporting: val }),
 
-  // Map Instance for direct control (fitBounds for PDF etc)
-  mapInstance: null,
-  setMapInstance: (val) => set({ mapInstance: val }),
-
   // History management
   history: [],
   redoStack: [],
@@ -173,6 +171,10 @@ const useStore = create((set, get) => ({
   }),
 
   // Map & Tools
+  mapInstance: null,
+  setMapInstance: (val) => set({ mapInstance: val }),
+  mapStyle: 'satellite',
+  setMapStyle: (val) => set({ mapStyle: val }),
   activeTool: null,
   setActiveTool: (tool) => set({ activeTool: tool }),
   isSnapEnabled: false,
