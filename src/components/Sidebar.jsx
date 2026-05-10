@@ -4,6 +4,8 @@ import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import useStore from '../store/useStore';
 
+import { useMRAuth } from '../hooks/useMRAuth';
+
 // ─── ASSET CATALOGUE ─────────────────────────────────────────────────────────
 const ASSET_CATALOGUE = [
   { types:['cone'],          label:'Traffic Cones',         pip:'cone',       purpose:'Perimeter delineation and lane channelisation',                         standard:'Space at calculated intervals per speed limit (IRC SP 55)',       unit:'EA'     },
@@ -80,6 +82,10 @@ const Sidebar = ({
   isOpen, onToggle,
   onGenerate, reportId,
 }) => {
+  const {
+    isAuthenticated, user, logout
+  } = useMRAuth();
+
   const {
     zones, activeZoneId, getActiveZone,
     setActiveZoneId, addZone, deleteZone, renameZone, updateActiveZone,
@@ -354,7 +360,14 @@ const Sidebar = ({
             });
           }
 
-          const canvas = mapInstance.getCanvas();
+          // Capture the entire map container using html2canvas to include DOM markers
+          const mapContainer = mapInstance.getContainer();
+          const canvas = await html2canvas(mapContainer, {
+            useCORS: true,
+            allowTaint: true,
+            backgroundColor: null,
+            logging: false
+          });
           const img = canvas.toDataURL('image/jpeg', 0.95);
           
           const aspect = canvas.height / canvas.width;
@@ -521,12 +534,25 @@ const Sidebar = ({
               <div className="sb-brand-sub">Traffic Management System</div>
             </div>
           </div>
-          <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
-            <button onClick={() => document.body.classList.toggle('light-mode')} style={{background: 'transparent', border: '1px solid var(--sb-border-2)', borderRadius: '4px', cursor: 'pointer', padding: '2px 4px', fontSize: '12px'}} title="Toggle Light Mode for outdoor visibility">☀️</button>
-            <div className={`sb-save-badge sb-save-badge--${saveIndicator.cls}`} role="status">
-              <span className="sb-save-dot"/>
-              {saveIndicator.label}
-            </div>
+          <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
+            <button onClick={() => document.body.classList.toggle('light-mode')} style={{background: 'transparent', border: '1px solid var(--sb-border-2)', borderRadius: '4px', cursor: 'pointer', padding: '4px 6px', fontSize: '12px'}} title="Toggle Light Mode">☀️</button>
+            
+            {isAuthenticated && user && (
+              <div className="sb-user-profile" style={{display:'flex', alignItems:'center', gap:'10px', background:'rgba(255,255,255,0.05)', padding:'4px 8px', borderRadius:'20px', border:'1px solid var(--sb-border-2)'}}>
+                {user.picture && <img src={user.picture} alt={user.name} style={{width:24, height:24, borderRadius:'50%'}} />}
+                <div style={{display:'flex', flexDirection:'column'}}>
+                  <span style={{fontSize:'10px', fontWeight:700, color:'var(--sb-text-main)', maxWidth:'80px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{user.name}</span>
+                  <button onClick={() => logout({ logoutParams: { returnTo: window.location.origin } })} style={{background:'none', border:'none', color:'var(--sb-accent)', fontSize:'9px', fontWeight:800, padding:0, textAlign:'left', cursor:'pointer'}}>LOGOUT</button>
+                </div>
+              </div>
+            )}
+
+            {!isAuthenticated && (
+              <div className={`sb-save-badge sb-save-badge--${saveIndicator.cls}`} role="status">
+                <span className="sb-save-dot"/>
+                {saveIndicator.label}
+              </div>
+            )}
           </div>
         </div>
 

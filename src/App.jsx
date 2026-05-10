@@ -14,6 +14,9 @@ const MemoizedFloatingDock = React.memo(FloatingDock);
 import OnboardingOverlay from './components/OnboardingOverlay';
 import { snapToRoads, fetchRoadVectors } from './utils/geoSnap';
 
+import LoginScreen from './components/login/LoginScreen';
+import { useMRAuth } from './hooks/useMRAuth';
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 class ErrorBoundary extends Component {
@@ -296,7 +299,10 @@ export const checkZoneCompliance = (coords, shapeType, speedLimit, roadCollectio
 
 const App = () => {
   const {
-    isAuthenticated, setIsAuthenticated, isLoading, setIsLoading,
+    isAuthenticated, isLoading, login, logout
+  } = useMRAuth();
+
+  const {
     projectName, permitNumber, contractorName, clientName,
     startDate, endDate, superintendent, safetyOfficer, emergencyContact,
     setProjectField,
@@ -312,9 +318,6 @@ const App = () => {
     isSidebarOpen, setIsSidebarOpen,
     showOnboarding, setShowOnboarding
   } = useStore();
-
-  const loginWithRedirect = () => { setIsLoading(true); setTimeout(() => { setIsAuthenticated(true); setIsLoading(false); }, 1000); };
-  const logout = () => { setIsAuthenticated(false); };
 
   const [toast, setToast] = useState(null);
   const showToast = useCallback((msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); }, []);
@@ -423,20 +426,7 @@ const App = () => {
 
   if (isLoading) return <div className="login-screen"><div className="technical-grid" /><div className="loading-container">INITIALIZING...</div></div>;
 
-  if (!isAuthenticated) return (
-    <div className="login-screen">
-      <div className="technical-grid" />
-      <div className="login-container">
-        <div className="login-card">
-          <h1>Marg <span style={{color: '#0ea5e9'}}>Rakshak</span></h1>
-          <p>Traffic Management & Disaster Response</p>
-          <button className="technical-btn" onClick={loginWithRedirect} style={{marginTop: 40, width: '100%', padding: 15, background: '#0ea5e9', border: 'none', borderRadius: 8, color: '#000', fontWeight: 800, cursor: 'pointer'}}>
-            Log In
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+  if (!isAuthenticated) return <LoginScreen onLogin={login} />;
 
   return (
     <div className="app-container">

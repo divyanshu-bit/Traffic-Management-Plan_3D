@@ -19,9 +19,7 @@ export const AuthProvider = ({ children, isAuthEnabled }) => {
     console.log("AuthProvider Effect: isAuthEnabled =", isAuthEnabled, "auth0.isLoading =", auth0?.isLoading);
     
     if (!isAuthEnabled) {
-      console.log("Auth disabled, setting guest mode");
-      setIsAuthenticated(true);
-      setUser({ name: 'Guest User', email: 'guest@margrakshak.ai', picture: null });
+      console.log("AuthProvider: Local mode active (Auth0 credentials missing)");
       setIsLoading(false);
     } else if (auth0 && !auth0.isLoading) {
       console.log("Auth0 loaded, authenticated =", auth0.isAuthenticated);
@@ -47,7 +45,14 @@ export const AuthProvider = ({ children, isAuthEnabled }) => {
     return () => clearTimeout(timer);
   }, [isAuthEnabled, auth0?.isAuthenticated, auth0?.user, auth0?.isLoading]);
 
-  const login = () => isAuthEnabled ? auth0.loginWithRedirect() : setIsAuthenticated(true);
+  const login = (options) => {
+    if (isAuthEnabled) {
+      auth0.loginWithRedirect(options);
+    } else {
+      setUser({ name: 'Guest Operator', email: 'local-ops@margrakshak.ai', picture: null });
+      setIsAuthenticated(true);
+    }
+  };
   const logout = () => isAuthEnabled ? auth0.logout({ returnTo: window.location.origin }) : setIsAuthenticated(false);
 
   const value = {
