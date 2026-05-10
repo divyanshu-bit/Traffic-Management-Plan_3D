@@ -174,7 +174,7 @@ const LoginScreen = ({ onLogin }) => {
                 <label>OPERATOR IDENTITY</label>
                 <input type="text" className="login-input-v2" placeholder="ENTER USER ID" required />
               </div>
-              <MagneticButton className="technical-btn-v2" onClick={handleLoginClick} strength={50}>
+              <MagneticButton className="technical-btn-v2" strength={50}>
                 CONFIRM IDENTITY
               </MagneticButton>
               <div className="auth-divider-v2">
