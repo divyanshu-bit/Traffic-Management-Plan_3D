@@ -14,8 +14,8 @@ const MemoizedFloatingDock = React.memo(FloatingDock);
 import OnboardingOverlay from './OnboardingOverlay';
 import { snapToRoads, fetchRoadVectors } from '../utils/geoSnap';
 
-import LoginScreen from './components/login/LoginScreen';
-import { useMRAuth } from './hooks/useMRAuth';
+import LoginScreen from './login/LoginScreen';
+import { useMRAuth } from '../hooks/useMRAuth';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
