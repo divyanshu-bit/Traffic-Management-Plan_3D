@@ -6,8 +6,16 @@ import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { createRequire } from 'module';
 
+const require = createRequire(import.meta.url);
 dotenv.config();
+
+const { testConnection, sequelize } = require('./server/config/database');
+const projectRoutes = require('./server/routes/projectRoutes');
+const exportRoutes = require('./server/routes/exportRoutes');
+const wazeRoutes = require('./server/routes/wazeRoutes');
+const { syncWithWaze } = require('./server/services/wazeService');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,12 +26,20 @@ async function startServer() {
 
   const PORT = process.env.PORT || 3000;
 
-  // FIX #1: Replaced the wildcard CORS origin ("*") with an explicit allowlist
-  // driven by environment variables. A wildcard origin on a Socket.io server
-  // that also serves authenticated API routes is a security risk — any website
-  // could make credentialed cross-origin requests. In development the Vite dev
-  // server origin is allowed automatically; in production set CORS_ORIGIN in
-  // your environment (comma-separated for multiple origins).
+  // Background Task: Waze Sync
+  const SYNC_INTERVAL = (Number(process.env.WAZE_SYNC_INTERVAL) || 3600) * 1000;
+  const startWazeSync = () => {
+    console.log(`[WAZE SYNC] Auto-sync scheduled every ${SYNC_INTERVAL / 1000} seconds.`);
+    setInterval(async () => {
+      try {
+        await syncWithWaze();
+      } catch (e: any) {
+        console.error('[WAZE SYNC] Background sync failed:', e.message);
+      }
+    }, SYNC_INTERVAL);
+  };
+
+  // CORS Configuration
   const allowedOrigins = process.env.CORS_ORIGIN
     ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
     : process.env.NODE_ENV !== 'production'
@@ -32,7 +48,6 @@ async function startServer() {
 
   const corsOptions: cors.CorsOptions = {
     origin: (origin, callback) => {
-      // Allow requests with no origin (e.g. server-to-server, curl)
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
       callback(new Error(`CORS: origin "${origin}" not allowed`));
@@ -53,17 +68,22 @@ async function startServer() {
   app.use(cors(corsOptions));
   app.use(express.json());
 
-  // FIX #2: Renamed projectPresense → projectPresence (typo fix).
-  // Also typed the map properly so TypeScript can catch shape mismatches.
+  // API Routes
+  app.use('/api/projects', projectRoutes);
+  app.use('/api/exports', exportRoutes);
+  app.use('/api/waze', wazeRoutes);
+
+  app.get('/api/health', (_req, res) => {
+    res.json({ status: 'OK', message: 'Marg Rakshak API is running' });
+  });
+
+  // Real-time Collaboration
   const projectPresence: Record<string, Record<string, unknown>> = {};
 
   io.on('connection', (socket) => {
     console.log(`[REALTIME] Client connected: ${socket.id}`);
 
-    socket.on('join-project', ({ reportId, user }: { reportId: string; user: unknown }) => {
-      // FIX #3: Validate that reportId is a non-empty string before using it
-      // as a room name. A missing or malformed reportId would create phantom
-      // rooms and cause presence-update broadcasts to go to wrong clients.
+    socket.on('join-project', ({ reportId, user }: { reportId: string; user: any }) => {
       if (!reportId || typeof reportId !== 'string') {
         console.warn(`[REALTIME] join-project rejected: invalid reportId from ${socket.id}`);
         return;
@@ -75,9 +95,6 @@ async function startServer() {
     });
 
     socket.on('cursor-move', ({ reportId, lat, lng }: { reportId: string; lat: number; lng: number }) => {
-      // FIX #4: Only broadcast cursor-move if the socket is actually in the
-      // room. Without this check a malicious client could emit cursor-move for
-      // any reportId and spam other users' sessions.
       if (!socket.rooms.has(reportId)) return;
       socket.to(reportId).emit('peer-cursor', { socketId: socket.id, lat, lng });
     });
@@ -88,25 +105,16 @@ async function startServer() {
     });
 
     socket.on('disconnect', () => {
-      // Clean up presence for this socket across all rooms it was in
       for (const reportId in projectPresence) {
         if (projectPresence[reportId][socket.id]) {
           delete projectPresence[reportId][socket.id];
           io.to(reportId).emit('presence-update', Object.values(projectPresence[reportId]));
-          // FIX #5: Removed the early `break` — a socket can join multiple
-          // rooms (e.g. a project + a global room), so we must clean up all of
-          // them, not just the first match.
         }
       }
     });
   });
 
-  // API Routes
-  app.get('/api/health', (_req, res) => {
-    res.json({ status: 'OK', message: 'Marg Rakshak API is running' });
-  });
-
-  // Development: Vite middleware for HMR and asset serving
+  // Development: Vite middleware
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -114,25 +122,33 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    // Production: serve the pre-built frontend
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    // FIX #6: Catch-all must come after all API routes so that API 404s are
-    // not silently swallowed by the SPA fallback. Moved to end of route chain.
     app.get('*', (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
-  httpServer.listen(Number(PORT), '0.0.0.0', () => {
-    console.log(`[SERVER] Running at http://localhost:${PORT} (${process.env.NODE_ENV || 'development'})`);
-    if (allowedOrigins.length > 0) {
-      console.log(`[SERVER] CORS allowed origins: ${allowedOrigins.join(', ')}`);
-    }
-  });
+  // Database Connection and Server Start
+  try {
+    await testConnection();
+    await sequelize.sync({ alter: true });
+    console.log('[DB] Database models synchronized.');
+
+    httpServer.listen(Number(PORT), '0.0.0.0', () => {
+      console.log(`[SERVER] Running at http://localhost:${PORT} (${process.env.NODE_ENV || 'development'})`);
+      startWazeSync();
+    });
+  } catch (error) {
+    console.error('[SERVER] Failed to start due to database connection error:', error);
+    // Still start the server if DB fails? Maybe not, but for preview we might want to see the UI
+    httpServer.listen(Number(PORT), '0.0.0.0', () => {
+      console.log(`[SERVER] Running at http://localhost:${PORT} (WITHOUT DATABASE)`);
+    });
+  }
 }
 
 startServer().catch(err => {
-  console.error('[SERVER] Failed to start:', err);
+  console.error('[SERVER] Global failure:', err);
   process.exit(1);
 });

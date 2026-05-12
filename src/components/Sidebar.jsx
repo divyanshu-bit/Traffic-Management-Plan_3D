@@ -416,29 +416,58 @@ const Sidebar = ({
 
               await new Promise(r => {
                 mapInstance.once('idle', r);
-                setTimeout(r, 1200); 
+                setTimeout(r, 1500); // Give 3D tiles more time to load
               });
             }
             
-            // Force a repaint and capture during the render event to ensure the WebGL buffer is populated
             return await new Promise(resolve => {
               mapInstance.once('render', async () => {
                 try {
+                  const webglCanvas = mapInstance.getCanvas();
                   const container = mapInstance.getContainer();
-                  const canvas = await html2canvas(container, { 
+                  
+                  // Use html2canvas ONLY for the HTML markers to prevent WebGL context memory blowout
+                  const markerCanvas = await html2canvas(container, { 
                     useCORS: true, 
                     logging: false, 
-                    scale: 2,
-                    backgroundColor: null
+                    scale: 1, 
+                    backgroundColor: null,
+                    ignoreElements: (el) => el.classList.contains('mapboxgl-canvas') || el.classList.contains('maplibregl-canvas')
                   });
-                  resolve(canvas.toDataURL('image/jpeg', 0.9));
+                  
+                  // Composite them together manually
+                  const compCanvas = document.createElement('canvas');
+                  compCanvas.width = webglCanvas.width;
+                  compCanvas.height = webglCanvas.height;
+                  const ctx = compCanvas.getContext('2d');
+                  
+                  ctx.drawImage(webglCanvas, 0, 0, compCanvas.width, compCanvas.height);
+                  ctx.drawImage(markerCanvas, 0, 0, compCanvas.width, compCanvas.height);
+                  
+                  resolve(compCanvas.toDataURL('image/jpeg', 0.85));
                 } catch(err) {
-                  console.warn('html2canvas failed, falling back to WebGL canvas', err);
-                  resolve(mapInstance.getCanvas().toDataURL('image/jpeg', 0.9));
+                  console.warn('captureView composite failed, falling back', err);
+                  try { resolve(mapInstance.getCanvas().toDataURL('image/jpeg', 0.85)); }
+                  catch(e2) { resolve(null); }
                 }
               });
               mapInstance.triggerRepaint();
             });
+          };
+
+          const safeAddImage = (imgData, x, y, w, h) => {
+            if (!imgData || imgData.length < 10) {
+              S(...C.border); LW(0.2); R(x, y, w, h, 'D');
+              TC(...C.tDim); FN(); FS(6); T('Image Error', x + w/2, y + h/2, {align: 'center'});
+              return;
+            }
+            try {
+              pdf.addImage(imgData, 'JPEG', x, y, w, h);
+            } catch(e) {
+              console.warn('Failed to add image to PDF', e);
+              S(...C.border); LW(0.2); R(x, y, w, h, 'D');
+              TC(...C.tFaint); FN(); FS(6); T('Format Error', x + w/2, y + h/2, {align: 'center'});
+            }
           };
 
           // Capture 4 views
@@ -452,10 +481,10 @@ const Sidebar = ({
           
           S(...C.accent); LW(0.4); 
           RR(M-1, curY-1, mainW+2, mainH+2, 1, 'D');
-          pdf.addImage(imgDark, 'JPEG', M, curY, mainW, mainH);
+          safeAddImage(imgDark, M, curY, mainW, mainH);
           
           RR(M + mainW + 3, curY-1, mainW+2, mainH+2, 1, 'D');
-          pdf.addImage(imgSat, 'JPEG', M + mainW + 4, curY, mainW, mainH);
+          safeAddImage(imgSat, M + mainW + 4, curY, mainW, mainH);
           
           TC(...C.tDim); FN(); FS(5);
           T('AERIAL: DARK PLAN', M + mainW/2, curY + mainH + 4, {align:'center'});
@@ -469,10 +498,10 @@ const Sidebar = ({
           
           S(...C.accent); LW(0.3); 
           RR(M-1, curY-1, subW+2, subH+2, 2, 'D');
-          pdf.addImage(imgIso, 'JPEG', M, curY, subW, subH);
+          safeAddImage(imgIso, M, curY, subW, subH);
           
           RR(M + subW + 5, curY-1, subW+2, subH+2, 2, 'D');
-          pdf.addImage(imgApp, 'JPEG', M + subW + 6, curY, subW, subH);
+          safeAddImage(imgApp, M + subW + 6, curY, subW, subH);
           
           TC(...C.tDim); FN(); FS(5.5);
           T('3D ISOMETRIC (AERIAL)', M + subW/2, curY + subH + 5, {align:'center'});

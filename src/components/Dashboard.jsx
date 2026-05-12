@@ -424,22 +424,40 @@ const App = () => {
 
   const handleUpdatePointCount = useCallback((count) => setDrawPointCount(count), [setDrawPointCount]);
 
-  if (isLoading) return <div className="login-screen"><div className="technical-grid" /><div className="loading-container">INITIALIZING...</div></div>;
+  if (isLoading) return (
+    <div className="login-screen">
+      <div className="technical-grid" />
+      <div className="login-container" style={{ textAlign: 'center', color: 'white' }}>
+        <h1 style={{ fontSize: '1.8rem', fontWeight: 900, marginBottom: '10px', letterSpacing: '-0.02em' }}>MARG RAKSHAK</h1>
+        <div className="status-dot pulsed" style={{ margin: '20px auto' }} />
+        <p style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.75rem', color: '#94a3b8', letterSpacing: '0.15em' }}>
+          INITIALIZING SECURE TERMINAL...
+        </p>
+        <p style={{ marginTop: '40px', fontSize: '0.7rem', opacity: 0.4 }}>
+          If this takes more than 5 seconds, check your connection to the Auth server.
+        </p>
+      </div>
+    </div>
+  );
 
-  if (!isAuthenticated) return <LoginScreen onLogin={login} />;
+  if (!isAuthenticated) return (
+    <ErrorBoundary>
+      <LoginScreen onLogin={login} />
+    </ErrorBoundary>
+  );
 
   return (
-    <div className="app-container">
-      <div className="toast-container">
-        {planRestoredMsg && <div className="toast">{planRestoredMsg}</div>}
-        {toast && <div className="toast">{toast}</div>}
-      </div>
-      <Sidebar
-        isOpen={isSidebarOpen} onToggle={() => setIsSidebarOpen(v => !v)}
-        reportId={reportId.current} onGenerate={handleGenerate}
-      />
-      <div className={`map-fullscreen ${activeTool?.startsWith('draw-') ? 'cursor-crosshair' : activeTool ? 'map-asset-pointer' : 'map-grab'}`}>
-        <ErrorBoundary>
+    <ErrorBoundary>
+      <div className="app-container">
+        <div className="toast-container">
+          {planRestoredMsg && <div className="toast">{planRestoredMsg}</div>}
+          {toast && <div className="toast">{toast}</div>}
+        </div>
+        <Sidebar
+          isOpen={isSidebarOpen} onToggle={() => setIsSidebarOpen(v => !v)}
+          reportId={reportId.current} onGenerate={handleGenerate}
+        />
+        <div className={`map-fullscreen ${activeTool?.startsWith('draw-') ? 'cursor-crosshair' : activeTool ? 'map-asset-pointer' : 'map-grab'}`}>
           <MapArea
             activeTool={activeTool} drawSessionKey={drawSessionKey}
             zones={zones} activeZoneId={activeZoneId}
@@ -456,14 +474,14 @@ const App = () => {
             liveIncidents={incidents}
             showToast={showToast}
           />
-        </ErrorBoundary>
+        </div>
+        <FloatingDock
+          onClear={handleClear}
+          showToast={showToast}
+        />
+        {showOnboarding && <OnboardingOverlay onDismiss={() => setShowOnboarding(false)} />}
       </div>
-      <FloatingDock
-        onClear={handleClear}
-        showToast={showToast}
-      />
-      {showOnboarding && <OnboardingOverlay onDismiss={() => setShowOnboarding(false)} />}
-    </div>
+    </ErrorBoundary>
   );
 };
 

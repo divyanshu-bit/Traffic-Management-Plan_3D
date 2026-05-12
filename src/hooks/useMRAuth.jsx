@@ -16,19 +16,19 @@ export const AuthProvider = ({ children, isAuthEnabled }) => {
   const [isLoading, setIsLoading] = useState(true); // Start with true to allow effect to run
 
   useEffect(() => {
-    console.log("AuthProvider Effect: isAuthEnabled =", isAuthEnabled, "auth0.isLoading =", auth0?.isLoading);
+    console.log("[AUTH] AuthProvider Effect: isAuthEnabled =", isAuthEnabled, "auth0.isLoading =", auth0?.isLoading);
     
     if (!isAuthEnabled) {
-      console.log("AuthProvider: Local mode active (Auth0 credentials missing)");
+      console.log("[AUTH] Local mode active (Auth0 credentials missing)");
       setIsLoading(false);
     } else if (auth0 && !auth0.isLoading) {
-      console.log("Auth0 loaded, authenticated =", auth0.isAuthenticated);
+      console.log("[AUTH] Auth0 loaded, authenticated =", auth0.isAuthenticated, "user =", auth0.user?.email);
       setIsAuthenticated(auth0.isAuthenticated);
       setUser(auth0.user);
       setIsLoading(false);
     } else if (!auth0 && isAuthEnabled) {
-      console.error("Auth enabled but auth0 object is missing");
-      setIsLoading(false); // Fallback to prevent white screen
+      console.error("[AUTH] Auth enabled but auth0 object is missing from hook");
+      // This usually happens if Auth0Provider is not wrapping this component
     }
 
     // Safety timeout to prevent infinite white screen

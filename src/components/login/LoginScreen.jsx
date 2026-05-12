@@ -134,7 +134,31 @@ const LoginScreen = ({ onLogin }) => {
   };
 
   const handleGoogleLogin = () => {
-    onLogin({ connection: 'google-oauth2' });
+    setIsExiting(true);
+    const tl = gsap.timeline({ 
+      onComplete: () => onLogin({ connection: 'google-oauth2' }) 
+    });
+
+    tl.to(cardRef.current, { 
+      scale: 0.8, 
+      opacity: 0, 
+      y: 40,
+      duration: 0.5, 
+      ease: "power4.in" 
+    });
+
+    tl.to(".char", { 
+      y: -100, 
+      opacity: 0, 
+      stagger: 0.02, 
+      duration: 0.5, 
+      ease: "power4.in" 
+    }, "-=0.4");
+
+    tl.to(containerRef.current, { 
+      backgroundColor: "#0ea5e9", 
+      duration: 0.4 
+    }, "-=0.2");
   };
 
 
@@ -169,22 +193,25 @@ const LoginScreen = ({ onLogin }) => {
               <span className="status-dot pulsed" />
               <span className="status-text">SECURE TERMINAL READY</span>
             </div>
-            <form className="login-form-v2" onSubmit={handleLoginClick}>
+            <form className="login-form-v2" onSubmit={(e) => e.preventDefault()}>
               <div className="input-group-v2">
-                <label>OPERATOR IDENTITY</label>
-                <input type="text" className="login-input-v2" placeholder="ENTER USER ID" required />
+                <label>OPERATOR EMAIL</label>
+                <input type="email" className="login-input-v2" placeholder="OPERATOR@MARGRAKSHAK.AI" />
               </div>
-              <MagneticButton className="technical-btn-v2" strength={50}>
-                CONFIRM IDENTITY
-              </MagneticButton>
+              <div className="input-group-v2">
+                <label>ACCESS KEY (PASSWORD)</label>
+                <input type="password" className="login-input-v2" placeholder="••••••••" />
+              </div>
+              
               <div className="auth-divider-v2">
                 <div className="divider-line" />
-                <span>OR CONNECT VIA</span>
+                <span>SECURE ACCESS VIA</span>
                 <div className="divider-line" />
               </div>
-              <button type="button" className="google-btn-v2" onClick={handleGoogleLogin}>
+
+              <button type="button" className="google-btn-v2" onClick={handleGoogleLogin} style={{ padding: '18px', background: 'rgba(255, 255, 255, 0.1)', border: '1px solid rgba(255, 255, 255, 0.3)' }}>
                 <svg className="google-icon" viewBox="0 0 24 24"><path fill="#EA4335" d="M12 5.04c1.94 0 3.51.68 4.79 1.84l3.52-3.52C18.11 1.5 15.31 0 12 0 7.33 0 3.26 2.69 1.2 6.64l4.1 3.19C6.26 7.15 8.91 5.04 12 5.04z" /><path fill="#4285F4" d="M23.64 12.2c0-.77-.07-1.52-.2-2.24H12v4.25h6.52c-.28 1.51-1.09 2.78-2.35 3.64l3.66 2.85c2.14-1.97 3.81-4.87 3.81-8.5z" /><path fill="#FBBC05" d="M5.3 14.51c-.24-.71-.38-1.47-.38-2.26s.14-1.55.38-2.26L1.2 6.64C.43 8.24 0 10.06 0 12s.43 3.76 1.2 5.36l4.1-3.21z" /><path fill="#34A853" d="M12 24c3.24 0 5.96-1.07 7.95-2.91l-3.66-2.85c-1.1.74-2.5 1.18-4.29 1.18-3.09 0-5.71-2.09-6.65-4.91L1.2 17.64C3.26 21.31 7.33 24 12 24z" /></svg>
-                Sign in with Google
+                CONTINUE WITH GOOGLE
               </button>
 
               <div className="signup-prompt" style={{ marginTop: '15px', fontSize: '0.75rem', color: '#64748b' }}>
