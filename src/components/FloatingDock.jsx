@@ -84,7 +84,7 @@ const FloatingDock = ({ onClear, showToast }) => {
 
 
   return (
-    <div className="floating-dock-container">
+    <div className="floating-dock-container animate-entrance-dock">
 
       {activeZone && !isDrawing && isExpanded && (
         <div className="dock-zone-pill" style={{borderColor:zoneColor,color:zoneColor}}>

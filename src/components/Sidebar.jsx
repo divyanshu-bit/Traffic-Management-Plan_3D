@@ -128,6 +128,23 @@ const Sidebar = ({
     return {perim,area,center,minPerim,compliant:perim>=minPerim,isPath};
   }, [az?.coords, az?.shapeType, az?.speedLimit]);
 
+  const sidesOptions = useMemo(() => {
+    if (!az?.coords?.length) return [];
+    const isPath = az.shapeType === 'polyline';
+    const numCoords = az.coords.length;
+    const loopLimit = isPath ? numCoords - 1 : numCoords;
+    const opts = [];
+    for (let i = 0; i < loopLimit; i++) {
+      const vStart = i + 1;
+      const vEnd = isPath ? (i + 2) : ((i + 1) % numCoords + 1);
+      opts.push({
+        value: i,
+        label: `Side ${i + 1} (Vertex ${vStart} → ${vEnd})`
+      });
+    }
+    return opts;
+  }, [az?.coords, az?.shapeType]);
+
   const assetCounts = useMemo(()=>countByType(az?.placedAssets||[]),[az?.placedAssets]);
   const totalAssets = (az?.placedAssets||[]).length;
 
@@ -643,7 +660,7 @@ const Sidebar = ({
 
   return (
     <div className={`sidebar-wrapper ${!isOpen?'collapsed':''}`}>
-      <aside className="main-sidebar" style={{pointerEvents:isExporting?'none':'auto'}} aria-busy={isExporting}>
+      <aside className="main-sidebar animate-entrance-sidebar" style={{pointerEvents:isExporting?'none':'auto'}} aria-busy={isExporting}>
 
         {isExporting && (
           <div className="export-overlay" aria-live="assertive">
@@ -804,6 +821,67 @@ const Sidebar = ({
                       </Select>
                     </Field>
                   </div>
+                  <div className="sp-grid-2">
+                    <Field id="disable-taper" label="Taper Settings">
+                      <Select 
+                        id="disable-taper" 
+                        value={(!az.approachEdgeIndices || az.approachEdgeIndices.length === 0) ? "disabled" : "enabled"} 
+                        onChange={(val) => {
+                          const disabled = val === "disabled";
+                          updateActiveZone({ 
+                            approachEdgeIndices: disabled ? [] : [0]
+                          });
+                        }}
+                        disabled={isGenerating}
+                      >
+                        <option value="enabled">Standard (With Taper)</option>
+                        <option value="disabled">Perimeter Only (No Taper)</option>
+                      </Select>
+                    </Field>
+                    <Field id="approach-side" label="Traffic Approach Side">
+                      <div className="approach-sides-chips" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                        {sidesOptions.length === 0 ? (
+                          <span style={{ fontSize: '12px', color: '#64748b' }}>Draw boundary first...</span>
+                        ) : (
+                          sidesOptions.map(opt => {
+                            const isSelected = az.approachEdgeIndices?.includes(opt.value);
+                            return (
+                              <button
+                                key={opt.value}
+                                onClick={() => {
+                                  if (isGenerating) return;
+                                  const current = az.approachEdgeIndices || [];
+                                  let newIndices;
+                                  if (current.includes(opt.value)) {
+                                    newIndices = current.filter(i => i !== opt.value);
+                                  } else {
+                                    newIndices = [...current, opt.value];
+                                  }
+                                  updateActiveZone({ approachEdgeIndices: newIndices, taperDisabled: newIndices.length === 0 });
+                                }}
+                                disabled={isGenerating}
+                                style={{
+                                  padding: '4px 10px',
+                                  fontSize: '11px',
+                                  borderRadius: '12px',
+                                  border: isSelected ? '1px solid #38bdf8' : '1px solid #334155',
+                                  background: isSelected ? 'rgba(56, 189, 248, 0.15)' : 'transparent',
+                                  color: isSelected ? '#38bdf8' : '#94a3b8',
+                                  cursor: isGenerating ? 'not-allowed' : 'pointer',
+                                  transition: 'all 0.2s',
+                                  outline: 'none'
+                                }}
+                                title={opt.label}
+                              >
+                                Side {opt.value + 1}
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                    </Field>
+                  </div>
+                  <span className="sp-hint" style={{ display: 'block', marginTop: '-4px', marginBottom: '8px' }}>💡 Pro-Tip: You can click directly on any boundary edge on the map to select the approach side.</span>
                   <Toggle id="waze-toggle" label="Sync Road API" checked={isWazeSync} onChange={setIsWazeSync} tag="LIVE"/>
                   <div className="sp-derived-strip">
                     <div className="sp-derived-item"><span className="sp-derived-label" title="Spacing between cones">Spacing</span><span className="sp-derived-value">{sp.coneSpacing}</span></div>
@@ -894,8 +972,8 @@ const Sidebar = ({
                   </div>
                   {zoneStats?(
                     <div className="sb-zone-stats">
-                      <div className="sb-zone-stat"><span className="sb-zone-stat-val">{fmtDist(zoneStats.perim)}</span><span className="sb-zone-stat-lbl">Perim</span></div>
-                      {!zoneStats.isPath&&<div className="sb-zone-stat"><span className="sb-zone-stat-val">{fmtArea(zoneStats.area)}</span><span className="sb-zone-stat-lbl">Area</span></div>}
+                      <div className="sb-zone-stat"><span className="sb-zone-stat-val">{fmtDist(zoneStats.perim)}</span> <span className="sb-zone-stat-lbl">Perimeter</span></div>
+                      {!zoneStats.isPath&&<div className="sb-zone-stat"><span className="sb-zone-stat-val">{fmtArea(zoneStats.area)}</span> <span className="sb-zone-stat-lbl">Area</span></div>}
                     </div>
                   ):<p className="sb-zone-empty">Draw zone boundary first.</p>}
                 </div>

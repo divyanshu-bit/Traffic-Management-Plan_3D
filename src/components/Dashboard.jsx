@@ -63,6 +63,34 @@ export const haversineDist = (p1, p2) => {
 export const generatePerimeterAssets = (coords, shapeType = 'polygon', approachIndices = [0], spacingMeters = 18, speedLimit = 50, roadCollection = null) => {
   const minPts = shapeType === 'polyline' ? 2 : 3;
   if (!coords || coords.length < minPts) return [];
+
+  // Bounding box pre-filtering to optimize road/building collision check performance
+  if (roadCollection?.features?.length) {
+    try {
+      const lats = coords.map(c => c.lat);
+      const lngs = coords.map(c => c.lng);
+      const pad = 0.0015; // roughly 160m safety margin
+      const zoneBbox = [
+        Math.min(...lngs) - pad,
+        Math.min(...lats) - pad,
+        Math.max(...lngs) + pad,
+        Math.max(...lats) + pad
+      ];
+      const filteredFeatures = roadCollection.features.filter(f => {
+        try {
+          const fBbox = turf.bbox(f);
+          return fBbox[0] <= zoneBbox[2] && fBbox[2] >= zoneBbox[0] &&
+                 fBbox[1] <= zoneBbox[3] && fBbox[3] >= zoneBbox[1];
+        } catch {
+          return false;
+        }
+      });
+      roadCollection = { ...roadCollection, features: filteredFeatures };
+    } catch (e) {
+      console.warn("Bounding box pre-filtering failed, falling back to original collection", e);
+    }
+  }
+
   const assets = [];
   const tsBase = Date.now();
   const lerp = (s, e, t) => ({ lat: s.lat + (e.lat - s.lat) * t, lng: s.lng + (e.lng - s.lng) * t });
@@ -152,8 +180,60 @@ export const generatePerimeterAssets = (coords, shapeType = 'polygon', approachI
     return null;
   };
 
+  // Pre-calculate which approach edges have a parallel road-aligned taper.
+  // If the taper and edge alignments diverge (or no road is found), we do not skip perimeter cones on that edge.
+  const skippedPerimeterEdges = [];
+  approachIndices.forEach(approachIdx => {
+    const safeIdx = Math.min(Math.max(0, approachIdx), loopLimit - 1);
+    const startPoint = coords[safeIdx];
+    const endPoint   = coords[(safeIdx + 1) % coords.length];
+    
+    let followRoad = null;
+    const midPoint = lerp(startPoint, endPoint, 0.5);
+    if (roadCollection?.features?.length) {
+      const p = turf.point([midPoint.lng, midPoint.lat]);
+      let minDist = Infinity;
+      roadCollection.features.forEach(f => {
+        if (f.properties.isBuilding || f.properties.isObstacle) return;
+        const d = turf.pointToLineDistance(p, f, { units: 'meters' });
+        if (d < minDist && d < 45) { minDist = d; followRoad = f; }
+      });
+    }
+
+    if (followRoad) {
+      try {
+        const p = turf.point([midPoint.lng, midPoint.lat]);
+        const snappedMid = turf.nearestPointOnLine(followRoad, p);
+        const startLoc = snappedMid.properties.location || 0;
+        const lineLen = turf.length(followRoad, { units: 'meters' });
+        const aheadDist = Math.min(lineLen, startLoc + 1);
+        const aheadPoint = turf.along(followRoad, aheadDist, { units: 'meters' });
+        const refPoint = (aheadDist <= startLoc)
+          ? turf.along(followRoad, Math.max(0, startLoc - 1), { units: 'meters' })
+          : snappedMid;
+        const targetPoint = (aheadDist <= startLoc) ? snappedMid : aheadPoint;
+        let roadBearing = turf.bearing(refPoint, targetPoint);
+        if (isNaN(roadBearing)) roadBearing = 0;
+
+        const edgeBearing = turf.bearing(
+          turf.point([startPoint.lng, startPoint.lat]),
+          turf.point([endPoint.lng, endPoint.lat])
+        );
+
+        let angleDiff = Math.abs((edgeBearing - roadBearing) % 180);
+        if (angleDiff > 90) angleDiff = 180 - angleDiff;
+
+        if (angleDiff < 35) {
+          skippedPerimeterEdges.push(safeIdx);
+        }
+      } catch (e) {
+        skippedPerimeterEdges.push(safeIdx);
+      }
+    }
+  });
+
   for (let i = 0; i < loopLimit; i++) {
-    if (approachIndices.includes(i)) continue;
+    if (skippedPerimeterEdges.includes(i)) continue;
     const start = coords[i], end = coords[(i + 1) % coords.length];
     const dist = haversineDist(start, end);
     const count = Math.max(1, Math.ceil(dist / spacingMeters));
@@ -161,14 +241,7 @@ export const generatePerimeterAssets = (coords, shapeType = 'polygon', approachI
       const t = j / count;
       let finalPos = findClearPosLine(start, end, t, 3);
       if (!finalPos) continue;
-      try {
-        if (roadCollection?.features?.length) {
-          const snapped = snapToRoads([finalPos.lat, finalPos.lng], roadCollection, 5); 
-          if (snapped && !checkCollision(snapped[1], snapped[0])) {
-            finalPos = { lat: snapped[0], lng: snapped[1] };
-          }
-        }
-      } catch (err) {}
+      // Do not snap standard perimeter cones to roads to ensure they align perfectly with the user's drawn boundary.
       assets.push({ 
         id: `auto-${tsBase}-${i}-${j}`, 
         type: 'cone', source: 'auto', 
@@ -188,8 +261,9 @@ export const generatePerimeterAssets = (coords, shapeType = 'polygon', approachI
     const sp = params[String(speedLimit)] || params['50'];
 
     let followRoad = null;
+    const midPoint = lerp(startPoint, endPoint, 0.5);
     if (roadCollection?.features?.length) {
-      const p = turf.point([startPoint.lng, startPoint.lat]);
+      const p = turf.point([midPoint.lng, midPoint.lat]);
       let minDist = Infinity;
       roadCollection.features.forEach(f => {
         if (f.properties.isBuilding || f.properties.isObstacle) return;
@@ -346,6 +420,37 @@ const App = () => {
   const canRedo = redoStack.length > 0;
   const activeZone = getActiveZone();
 
+  // Auto-regenerate active zone assets when properties affecting layout change (if plan has already been generated)
+  useEffect(() => {
+    if (activeZone?.hasGenerated && activeZone?.coords?.length) {
+      const autoCones = generatePerimeterAssets(
+        activeZone.coords,
+        activeZone.shapeType,
+        activeZone.approachEdgeIndices || [0],
+        CONE_SPACING[activeZone.speedLimit] || 18,
+        activeZone.speedLimit,
+        roadCollection
+      );
+
+      const existingNonAuto = activeZone.placedAssets?.filter(a => a.source !== 'auto') || [];
+      const newPlacedAssets = [...existingNonAuto, ...autoCones];
+
+      const serializeAssets = (arr) => JSON.stringify(arr.map(a => ({ type: a.type, lat: a.lat, lng: a.lng })));
+      
+      if (serializeAssets(newPlacedAssets) !== serializeAssets(activeZone.placedAssets || [])) {
+        updateActiveZone({ placedAssets: newPlacedAssets });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    activeZone?.coords,
+    activeZone?.shapeType,
+    activeZone?.approachEdgeIndices,
+    activeZone?.speedLimit,
+    roadCollection,
+    updateActiveZone
+  ]);
+
   const handleAddZoneClick = useCallback(() => { pushUndo(); addZone(); setActiveTool(null); showToast(`New zone added`); }, [addZone, pushUndo, setActiveTool, showToast]);
   const handleDeleteZoneClick = useCallback((id) => { if (zones.length === 1) return showToast('At least one zone is required'); pushUndo(); deleteZone(id); showToast('Zone deleted'); }, [zones.length, deleteZone, pushUndo, showToast]);
 
@@ -395,7 +500,7 @@ const App = () => {
     let genRoads = roadCollection;
     if (!genRoads || genRoads.features?.length < 5) {
       const centroid = activeZone.coords.reduce((acc, c) => ({ lat: acc.lat + c.lat / activeZone.coords.length, lng: acc.lng + c.lng / activeZone.coords.length }), { lat: 0, lng: 0 });
-      genRoads = await fetchRoadVectors(centroid.lat, centroid.lng, 2000);
+      genRoads = await fetchRoadVectors(centroid.lat, centroid.lng, 600);
     }
     setGenProgress({ state: 'Placing assets...', percent: 70 });
     const autoCones = generatePerimeterAssets(activeZone.coords, activeZone.shapeType, activeZone.approachEdgeIndices || [0], CONE_SPACING[activeZone.speedLimit] || 18, activeZone.speedLimit, genRoads);

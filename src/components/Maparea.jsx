@@ -35,6 +35,19 @@ const ASSET_CONFIG = {
 // -- HELPERS --
 function lngLat(point) { return [point.lng, point.lat]; }
 
+function rectangleFromPoints(points) {
+  if (points.length !== 2) return points;
+  const [p1, p2] = points;
+  return [
+    p1,
+    { lng: p2.lng, lat: p1.lat },
+    p2,
+    { lng: p1.lng, lat: p2.lat }
+  ];
+}
+
+
+
 function featureFromCoords(coords, shapeType, cursor = null) {
   const display = cursor ? [...coords, cursor] : coords;
   if (display.length === 0) return { type: 'FeatureCollection', features: [] };
@@ -61,7 +74,7 @@ function toolToShapeType(tool) {
 }
 
 const MapArea = ({
-  activeTool, zones = [], activeZoneId, onSelectZone, isSnapEnabled,
+  activeTool, drawSessionKey, zones = [], activeZoneId, onSelectZone, isSnapEnabled,
   roadCollection, setRoadCollection, setPlacedAssets, onAssetRemove,
   onShapeDrawn, onUpdatePointCount, liveIncidents = [], showToast,
   updateZone, setActiveTool 
@@ -73,13 +86,22 @@ const MapArea = ({
 
   const mapRef = useRef(null);
   const [draftCoords, setDraftCoords] = useState([]);
-  const [drawingCursor, setDrawingCursor] = useState(null); // Added for reactive rubber-banding
   const [clickPing, setClickPing] = useState(null); 
   const [zoom, setZoom] = useState(16.5);
+  const [cursor, setCursor] = useState('auto');
+
+  const handleMouseEnter = useCallback(() => {
+    setCursor('pointer');
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    setCursor('auto');
+  }, []);
+
   const draftCoordsRef = useRef([]);
   const lastFetchRef = useRef(null);
-
-  useEffect(() => { draftCoordsRef.current = draftCoords; }, [draftCoords]);
+  const snapPromisesRef = useRef([]);
+  const requestRef = useRef();
 
   const handleVertexDragEnd = useCallback((zoneId, index, e) => {
     const newCoord = { lng: e.lngLat.lng, lat: e.lngLat.lat };
@@ -108,10 +130,42 @@ const MapArea = ({
     }).filter(Boolean)
   }), [zones, activeZoneId]);
 
+  const approachSidesGeoJSON = useMemo(() => {
+    const features = [];
+    zones.forEach(z => {
+      if (!z.coords || z.coords.length < 2 || z.taperDisabled) return;
+      const isPath = z.shapeType === 'polyline';
+      const numCoords = z.coords.length;
+      const loopLimit = isPath ? numCoords - 1 : numCoords;
+      const indices = z.approachEdgeIndices || [0];
+      
+      indices.forEach(idx => {
+        const safeIdx = Math.min(Math.max(0, idx), loopLimit - 1);
+        const start = z.coords[safeIdx];
+        const end = z.coords[(safeIdx + 1) % numCoords];
+        if (start && end) {
+          features.push({
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: [[start.lng, start.lat], [end.lng, end.lat]]
+            },
+            properties: {
+              zoneId: z.id,
+              color: z.color || '#0ea5e9',
+              isActive: z.id === activeZoneId
+            }
+          });
+        }
+      });
+    });
+    return { type: 'FeatureCollection', features };
+  }, [zones, activeZoneId]);
+
   const draftFeatureStatic = useMemo(() => {
     if (!activeTool?.startsWith('draw-') || draftCoords.length === 0) return { type: 'FeatureCollection', features: [] };
-    return featureFromCoords(draftCoords, toolToShapeType(activeTool), drawingCursor);
-  }, [draftCoords, activeTool, drawingCursor]);
+    return featureFromCoords(draftCoords, toolToShapeType(activeTool), null);
+  }, [draftCoords, activeTool]);
 
   const ensureRoadsNear = useCallback(async (lat, lng) => {
     if (!isSnapEnabled) return roadCollection;
@@ -119,7 +173,7 @@ const MapArea = ({
       const dist = turf.distance(turf.point([lng, lat]), turf.point([lastFetchRef.current.lng, lastFetchRef.current.lat]), { units: 'meters' });
       if (dist < 400) return roadCollection;
     }
-    const roads = await fetchRoadVectors(lat, lng, 900);
+    const roads = await fetchRoadVectors(lat, lng, 600);
     if (roads?.features?.length) { 
       setRoadCollection?.(roads); 
       lastFetchRef.current = { lat, lng };
@@ -142,40 +196,154 @@ const MapArea = ({
     setTimeout(() => setClickPing(prev => prev?.lng === rawPoint.lng ? null : prev), 800);
 
     if (activeTool?.startsWith('draw-')) {
-      const snapped = await maybeSnapPoint(rawPoint);
-      const nextCoords = [...draftCoordsRef.current, { ...snapped, snapped: snapped.lat !== rawPoint.lat }];
+      const clickIdx = draftCoordsRef.current.length;
       
-      if (activeTool === 'draw-rectangle' && nextCoords.length === 2) {
-        onShapeDrawn?.(rectangleFromPoints(nextCoords), 'rectangle');
-        setDraftCoords([]); onUpdatePointCount?.(0); setDrawingCursor(null);
+      // Update coordinates synchronously in refs & state to prevent race conditions
+      draftCoordsRef.current = [...draftCoordsRef.current, rawPoint];
+      setDraftCoords([...draftCoordsRef.current]);
+      onUpdatePointCount?.(draftCoordsRef.current.length);
+
+      // Async snapping
+      const myPromise = maybeSnapPoint(rawPoint);
+      snapPromisesRef.current.push(myPromise);
+
+      if (activeTool === 'draw-rectangle' && draftCoordsRef.current.length === 2) {
+        const currentPromises = [...snapPromisesRef.current];
+        snapPromisesRef.current = [];
+        const snappedPoints = await Promise.all(currentPromises);
+        onShapeDrawn?.(rectangleFromPoints(snappedPoints), 'rectangle');
+        draftCoordsRef.current = [];
+        setDraftCoords([]);
+        onUpdatePointCount?.(0);
+        if (mapRef.current) {
+          const map = mapRef.current.getMap();
+          const ds = map.getSource('draft-shape');
+          if (ds) ds.setData({ type: 'FeatureCollection', features: [] });
+          const cs = map.getSource('cursor-source');
+          if (cs) cs.setData({ type: 'FeatureCollection', features: [] });
+        }
         setActiveTool?.(null);
         return;
       }
 
-      setDraftCoords(nextCoords);
-      onUpdatePointCount?.(nextCoords.length);
+      const snapped = await myPromise;
+      const pt = draftCoordsRef.current[clickIdx];
+      // Only update if current coordinate has not changed (e.g. via undo/cancel)
+      if (pt && pt.lat === rawPoint.lat && pt.lng === rawPoint.lng) {
+        draftCoordsRef.current = draftCoordsRef.current.map((p, idx) =>
+          idx === clickIdx ? { ...snapped, snapped: snapped.lat !== rawPoint.lat } : p
+        );
+        setDraftCoords([...draftCoordsRef.current]);
+      }
       return;
     }
 
     if (!activeTool) {
-      const clicked = e.features?.[0];
-      if (clicked?.properties?.id) onSelectZone?.(clicked.properties.id);
+      const clicked = e.features?.find(f => f.layer.id === 'zones-line' || f.layer.id === 'zones-fill');
+      if (clicked) {
+        const zoneId = clicked.properties.id;
+        const clickedZone = zones.find(z => z.id === zoneId);
+        
+        // If it's the active zone, check if we clicked near one of its edges to set as approach side
+        if (zoneId === activeZoneId && clickedZone && clickedZone.coords?.length > 1) {
+          const clickPoint = turf.point([rawPoint.lng, rawPoint.lat]);
+          let minDistance = Infinity;
+          let closestEdgeIndex = 0;
+          
+          const isPath = clickedZone.shapeType === 'polyline';
+          const numCoords = clickedZone.coords.length;
+          const loopLimit = isPath ? numCoords - 1 : numCoords;
+          
+          for (let i = 0; i < loopLimit; i++) {
+            const start = clickedZone.coords[i];
+            const end = clickedZone.coords[(i + 1) % numCoords];
+            const segment = turf.lineString([[start.lng, start.lat], [end.lng, end.lat]]);
+            const dist = turf.pointToLineDistance(clickPoint, segment, { units: 'meters' });
+            if (dist < minDistance) {
+              minDistance = dist;
+              closestEdgeIndex = i;
+            }
+          }
+          
+          // If clicked within 35 meters of an edge, update approach side and enable taper
+          if (minDistance < 35) {
+            const currentIndices = clickedZone.approachEdgeIndices || [];
+            let newIndices;
+            if (currentIndices.includes(closestEdgeIndex)) {
+              newIndices = currentIndices.filter(idx => idx !== closestEdgeIndex);
+              showToast?.(`Approach side ${closestEdgeIndex + 1} removed`);
+            } else {
+              newIndices = [...currentIndices, closestEdgeIndex];
+              showToast?.(`Approach side ${closestEdgeIndex + 1} added`);
+            }
+            updateZone?.(zoneId, { approachEdgeIndices: newIndices, taperDisabled: newIndices.length === 0 });
+            return;
+          }
+        }
+        
+        if (zoneId !== activeZoneId) {
+          onSelectZone?.(zoneId);
+        }
+      }
       return;
     }
 
     const snappedData = await maybeSnapPoint(rawPoint);
     const rot = snappedData.road ? getRoadOrientation([snappedData.lat, snappedData.lng], snappedData.road) : 0;
     setPlacedAssets(prev => [...prev, { id: `manual-${Date.now()}`, type: activeTool, lat: snappedData.lat, lng: snappedData.lng, rotation: rot }]);
-  }, [activeTool, maybeSnapPoint, onSelectZone, setPlacedAssets, onUpdatePointCount, setActiveTool, onShapeDrawn]);
+  }, [activeTool, maybeSnapPoint, onSelectZone, setPlacedAssets, onUpdatePointCount, setActiveTool, onShapeDrawn, zones, activeZoneId, updateZone, showToast]);
 
   const handleMouseMove = useCallback((e) => {
-    if (!activeTool?.startsWith('draw-')) return;
-    setDrawingCursor({ lng: e.lngLat.lng, lat: e.lngLat.lat });
-  }, [activeTool]);
+    if (!activeTool?.startsWith('draw-') || !mapRef.current) return;
+
+    const map = mapRef.current.getMap();
+    let cursorPt = { lng: e.lngLat.lng, lat: e.lngLat.lat };
+    if (isSnapEnabled && roadCollection) {
+      const snapped = snapToRoads([cursorPt.lat, cursorPt.lng], roadCollection, 18);
+      if (snapped) {
+        cursorPt = { lat: snapped[0], lng: snapped[1] };
+      }
+    }
+
+    if (requestRef.current) cancelAnimationFrame(requestRef.current);
+
+    requestRef.current = requestAnimationFrame(() => {
+      const draftSource = map.getSource('draft-shape');
+      if (draftSource && draftCoordsRef.current.length > 0) {
+        const feat = featureFromCoords(draftCoordsRef.current, toolToShapeType(activeTool), cursorPt);
+        draftSource.setData(feat);
+      }
+
+      const cursorSource = map.getSource('cursor-source');
+      if (cursorSource) {
+        cursorSource.setData({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [cursorPt.lng, cursorPt.lat] },
+          properties: {}
+        });
+      }
+    });
+  }, [activeTool, isSnapEnabled, roadCollection]);
 
   const handleLoad = useCallback((e) => {
     setMapInstance(e.target);
   }, [setMapInstance]);
+
+  // Re-order layers after style change to ensure zones render above satellite tiles
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const map = mapRef.current.getMap();
+    const reorder = () => {
+      try {
+        const layerOrder = ['zones-fill', 'zones-line', 'approach-sides-glow', 'approach-sides-dash', 'draft-fill', 'draft-line', 'cursor-layer'];
+        layerOrder.forEach(id => {
+          if (map.getLayer(id)) map.moveLayer(id);
+        });
+      } catch (_) { /* layer may not exist yet */ }
+    };
+    map.on('styledata', reorder);
+    return () => map.off('styledata', reorder);
+  }, [mapStyle]);
 
   useEffect(() => { 
     if (mapRef.current && !useStore.getState().mapInstance) {
@@ -184,14 +352,38 @@ const MapArea = ({
   }, [setMapInstance]);
 
   useEffect(() => {
+    const clearDraftSources = () => {
+      if (!mapRef.current) return;
+      const map = mapRef.current.getMap();
+      const ds = map.getSource('draft-shape');
+      if (ds) ds.setData({ type: 'FeatureCollection', features: [] });
+      const cs = map.getSource('cursor-source');
+      if (cs) cs.setData({ type: 'FeatureCollection', features: [] });
+    };
+
     const finish = () => {
       const shapeType = toolToShapeType(activeTool);
       const coords = shapeType === 'rectangle' ? rectangleFromPoints(draftCoordsRef.current) : draftCoordsRef.current;
       onShapeDrawn?.(coords, shapeType);
-      setDraftCoords([]); onUpdatePointCount?.(0); setDrawingCursor(null);
+      draftCoordsRef.current = [];
+      setDraftCoords([]);
+      onUpdatePointCount?.(0);
+      snapPromisesRef.current = [];
+      clearDraftSources();
     };
-    const undo = () => { setDraftCoords(prev => prev.slice(0,-1)); onUpdatePointCount?.(Math.max(0, draftCoordsRef.current.length - 1)); };
-    const cancel = () => { setDraftCoords([]); onUpdatePointCount?.(0); setDrawingCursor(null); };
+    const undo = () => {
+      draftCoordsRef.current = draftCoordsRef.current.slice(0, -1);
+      setDraftCoords([...draftCoordsRef.current]);
+      onUpdatePointCount?.(Math.max(0, draftCoordsRef.current.length));
+      snapPromisesRef.current = snapPromisesRef.current.slice(0, -1);
+    };
+    const cancel = () => {
+      draftCoordsRef.current = [];
+      setDraftCoords([]);
+      onUpdatePointCount?.(0);
+      snapPromisesRef.current = [];
+      clearDraftSources();
+    };
     window.addEventListener('trigger-draw-finish', finish);
     window.addEventListener('trigger-draw-undo', undo);
     window.addEventListener('trigger-draw-cancel', cancel);
@@ -199,8 +391,35 @@ const MapArea = ({
       window.removeEventListener('trigger-draw-finish', finish);
       window.removeEventListener('trigger-draw-undo', undo);
       window.removeEventListener('trigger-draw-cancel', cancel);
+      if (requestRef.current) cancelAnimationFrame(requestRef.current);
     };
   }, [activeTool, onShapeDrawn, onUpdatePointCount]);
+
+  useEffect(() => {
+    if (!activeTool?.startsWith('draw-')) {
+      if (mapRef.current) {
+        const map = mapRef.current.getMap();
+        const ds = map.getSource('draft-shape');
+        if (ds) ds.setData({ type: 'FeatureCollection', features: [] });
+        const cs = map.getSource('cursor-source');
+        if (cs) cs.setData({ type: 'FeatureCollection', features: [] });
+      }
+    }
+  }, [activeTool]);
+
+  useEffect(() => {
+    draftCoordsRef.current = [];
+    setDraftCoords([]);
+    onUpdatePointCount?.(0);
+    snapPromisesRef.current = [];
+    if (mapRef.current) {
+      const map = mapRef.current.getMap();
+      const ds = map.getSource('draft-shape');
+      if (ds) ds.setData({ type: 'FeatureCollection', features: [] });
+      const cs = map.getSource('cursor-source');
+      if (cs) cs.setData({ type: 'FeatureCollection', features: [] });
+    }
+  }, [drawSessionKey, onUpdatePointCount]);
 
   // Persistent Assets Component
   const RenderedAssets = useMemo(() => {
@@ -243,24 +462,27 @@ const MapArea = ({
         onLoad={handleLoad}
         initialViewState={{ longitude: 77.209, latitude: 28.6139, zoom: 16.5, pitch: 38, bearing: -12 }}
         mapStyle={`https://api.maptiler.com/maps/${MAP_STYLES[mapStyle]}/style.json?key=${MAPTILER_KEY}`}
-        interactiveLayerIds={['zones-fill']}
+        interactiveLayerIds={activeTool ? undefined : ['zones-fill', 'zones-line']}
         onClick={handleMapClick}
         onMouseMove={handleMouseMove}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
         onMove={(evt) => setZoom(evt.viewState.zoom)}
         maxPitch={75}
         preserveDrawingBuffer={true}
+        cursor={activeTool ? 'crosshair' : cursor}
       >
         <NavigationControl position="bottom-right" visualizePitch />
         <Source id="buildings-source" type="vector" url={`https://api.maptiler.com/tiles/v3/tiles.json?key=${MAPTILER_KEY}`} />
         
         {mapStyle === 'satellite' && (
           <Source id="esri-world-imagery" type="raster" tiles={['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}']} tileSize={256} minzoom={1} maxzoom={19} attribution="Esri">
-            <Layer id="esri-world-imagery-layer" type="raster" beforeId="3d-buildings" />
+            <Layer id="esri-world-imagery-layer" type="raster" />
           </Source>
         )}
 
         {mapStyle === 'satellite' && (
-          <Layer id="satellite-roads" source-layer="transportation" source="buildings-source" type="line" beforeId="3d-buildings" paint={{ 'line-color': '#ffffff', 'line-opacity': 0.25, 'line-width': 1.2 }} />
+          <Layer id="satellite-roads" source-layer="transportation" source="buildings-source" type="line" paint={{ 'line-color': '#ffffff', 'line-opacity': 0.25, 'line-width': 1.2 }} />
         )}
         <Layer id="3d-buildings" source="buildings-source" source-layer="building" type="fill-extrusion" minzoom={14} paint={{ 'fill-extrusion-height': ['get', 'render_height'], 'fill-extrusion-base': ['get', 'render_min_height'], 'fill-extrusion-color': '#0ea5e9', 'fill-extrusion-opacity': 0.5 }} />
         
@@ -280,12 +502,17 @@ const MapArea = ({
           <Layer id="zones-line" type="line" paint={{ 'line-color': ['get', 'color'], 'line-width': ['case', ['boolean', ['get', 'isActive'], false], 5, 3] }} />
         </Source>
 
+        <Source id="approach-sides" type="geojson" data={approachSidesGeoJSON}>
+          <Layer id="approach-sides-glow" type="line" paint={{ 'line-color': ['get', 'color'], 'line-width': ['case', ['boolean', ['get', 'isActive'], false], 8, 4], 'line-opacity': 0.8 }} />
+          <Layer id="approach-sides-dash" type="line" paint={{ 'line-color': '#ffffff', 'line-width': ['case', ['boolean', ['get', 'isActive'], false], 3, 1.5], 'line-dasharray': [3, 3] }} />
+        </Source>
+
         <Source id="draft-shape" type="geojson" data={draftFeatureStatic}>
           <Layer id="draft-fill" type="fill" filter={['==', ['geometry-type'], 'Polygon']} paint={{ 'fill-color': isSnapEnabled ? '#10b981' : '#38bdf8', 'fill-opacity': 0.3 }} />
           <Layer id="draft-line" type="line" paint={{ 'line-color': isSnapEnabled ? '#10b981' : '#38bdf8', 'line-width': 4 }} />
         </Source>
 
-        <Source id="cursor-source" type="geojson" data={drawingCursor ? { type: 'Feature', geometry: { type: 'Point', coordinates: [drawingCursor.lng, drawingCursor.lat] }, properties: {} } : { type: 'FeatureCollection', features: [] }}>
+        <Source id="cursor-source" type="geojson" data={{ type: 'FeatureCollection', features: [] }}>
           <Layer id="cursor-layer" type="symbol" layout={{ 'text-field': '+', 'text-size': 24, 'text-font': ['Noto Sans Bold'], 'text-allow-overlap': true, 'text-ignore-placement': true }} paint={{ 'text-color': isSnapEnabled ? '#10b981' : '#0ea5e9', 'text-halo-color': '#fff', 'text-halo-width': 2 }} />
         </Source>
 
