@@ -89,9 +89,13 @@ const useStore = create((set, get) => ({
     zones: state.zones.map(z => z.id === id ? { ...z, ...patch } : z)
   })),
 
-  updateActiveZone: (patch) => set((state) => ({
-    zones: state.zones.map(z => z.id === state.activeZoneId ? { ...z, ...patch } : z)
-  })),
+  updateActiveZone: (patch) => set((state) => {
+    const targetId = state.activeZoneId || (state.zones.length > 0 ? state.zones[0].id : null);
+    if (!targetId) return state;
+    return {
+      zones: state.zones.map((z) => (z.id === targetId ? { ...z, ...patch } : z)),
+    };
+  }),
 
   setZones: (zones) => set({ zones }),
 
@@ -147,7 +151,7 @@ const useStore = create((set, get) => ({
   pushUndo: () => {
     const { zones } = get();
     set((state) => ({
-      history: [...state.history.slice(-19), JSON.parse(JSON.stringify(zones))],
+      history: [...state.history.slice(-19), zones],
       redoStack: []
     }));
   },
@@ -155,7 +159,7 @@ const useStore = create((set, get) => ({
     if (state.history.length === 0) return state;
     const previous = state.history[state.history.length - 1];
     return {
-      redoStack: [JSON.parse(JSON.stringify(state.zones)), ...state.redoStack.slice(0, 19)],
+      redoStack: [state.zones, ...state.redoStack.slice(0, 19)],
       history: state.history.slice(0, -1),
       zones: previous
     };
@@ -164,7 +168,7 @@ const useStore = create((set, get) => ({
     if (state.redoStack.length === 0) return state;
     const next = state.redoStack[0];
     return {
-      history: [...state.history, JSON.parse(JSON.stringify(state.zones))],
+      history: [...state.history, state.zones],
       redoStack: state.redoStack.slice(1),
       zones: next
     };

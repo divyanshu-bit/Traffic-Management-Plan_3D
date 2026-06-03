@@ -3,33 +3,15 @@ import * as turf from '@turf/turf';
 import useStore from '../store/useStore';
 import Map, { Layer, Marker, NavigationControl, Source } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { 
-  Construction, Shield, Truck, User, TrafficCone, AlertTriangle, 
-  Info, ArrowRight, Timer, Octagon, Ban, Activity, PlusCircle, MapPin, Square, Magnet
-} from 'lucide-react';
+import { Magnet } from 'lucide-react';
 import LocationSearch from './LocationSearch';
 import { fetchRoadVectors, snapToRoads, getRoadOrientation } from '../utils/geoSnap';
+import { createTrafficAssetsLayer, TRAFFIC_THREE_LAYER_ID } from './trafficThreeLayer';
 
 const MAPTILER_KEY = 'cxN8sHcrbJ8xB21xDxDj';
 const MAP_STYLES = {
   dark: 'streets-v2-dark',
   satellite: 'streets-v2-dark', 
-};
-
-// -- 2D ASSET CONFIGURATION (Professional Sign-inspired designs) --
-const ASSET_CONFIG = {
-  cone: { icon: TrafficCone, color: '#ff4d00', shape: 'circle' },
-  barrier: { icon: Square, color: '#ef4444', shape: 'rect' },
-  truck: { icon: Truck, color: '#facc15', shape: 'rect' },
-  sign: { icon: Construction, color: '#facc15', shape: 'diamond' },
-  'sign-stop': { icon: Octagon, color: '#ef4444', shape: 'octagon' },
-  'sign-roadwork': { icon: Construction, color: '#ff4d00', shape: 'diamond' },
-  'sign-merge': { icon: ArrowRight, color: '#f59e0b', shape: 'diamond' },
-  'sign-slow': { icon: Timer, color: '#facc15', shape: 'circle' },
-  flagger: { icon: User, color: '#22c55e', shape: 'circle' },
-  firstaid: { icon: Activity, color: '#ef4444', shape: 'circle' },
-  ACCIDENT: { icon: AlertTriangle, color: '#b91c1c', shape: 'triangle' },
-  HAZARD: { icon: AlertTriangle, color: '#d97706', shape: 'triangle' },
 };
 
 // -- HELPERS --
@@ -81,11 +63,13 @@ const MapArea = ({
 }) => {
   const isExporting = useStore(state => state.isExporting);
   const setMapInstance = useStore(state => state.setMapInstance);
+  const mapInstance = useStore(state => state.mapInstance);
   const mapStyle = useStore(state => state.mapStyle);
   const setMapStyle = useStore(state => state.setMapStyle);
 
   const mapRef = useRef(null);
   const [draftCoords, setDraftCoords] = useState([]);
+  const [firstStyleLayerId, setFirstStyleLayerId] = useState(undefined);
   const [clickPing, setClickPing] = useState(null); 
   const [zoom, setZoom] = useState(16.5);
   const [cursor, setCursor] = useState('auto');
@@ -102,6 +86,13 @@ const MapArea = ({
   const lastFetchRef = useRef(null);
   const snapPromisesRef = useRef([]);
   const requestRef = useRef();
+  const trafficLayerRef = useRef(null);
+  const trafficDataRef = useRef({ zones, activeZoneId });
+  const onAssetRemoveRef = useRef(onAssetRemove);
+
+  useEffect(() => {
+    onAssetRemoveRef.current = onAssetRemove;
+  }, [onAssetRemove]);
 
   const handleVertexDragEnd = useCallback((zoneId, index, e) => {
     const newCoord = { lng: e.lngLat.lng, lat: e.lngLat.lat };
@@ -186,11 +177,15 @@ const MapArea = ({
     if (!isSnapEnabled) return { lat, lng };
     const roads = await ensureRoadsNear(lat, lng);
     const snapped = snapToRoads([lat, lng], roads, 18);
-    if (snapped) return { lat: snapped[0], lng: snapped[1], road: roads.features.find(f => f.geometry.type.includes('Line')) || null };
+    if (snapped) return { lat: snapped.point[0], lng: snapped.point[1], road: snapped.road };
     return { lat, lng };
   }, [ensureRoadsNear, isSnapEnabled]);
 
   const handleMapClick = useCallback(async (e) => {
+    if (!activeTool && trafficLayerRef.current?.handleClick?.(e)) {
+      return;
+    }
+
     const rawPoint = { lng: e.lngLat.lng, lat: e.lngLat.lat };
     setClickPing(rawPoint);
     setTimeout(() => setClickPing(prev => prev?.lng === rawPoint.lng ? null : prev), 800);
@@ -301,7 +296,7 @@ const MapArea = ({
     if (isSnapEnabled && roadCollection) {
       const snapped = snapToRoads([cursorPt.lat, cursorPt.lng], roadCollection, 18);
       if (snapped) {
-        cursorPt = { lat: snapped[0], lng: snapped[1] };
+        cursorPt = { lat: snapped.point[0], lng: snapped.point[1] };
       }
     }
 
@@ -326,7 +321,8 @@ const MapArea = ({
   }, [activeTool, isSnapEnabled, roadCollection]);
 
   const handleLoad = useCallback((e) => {
-    setMapInstance(e.target);
+    const map = e.target?.getMap ? e.target.getMap() : e.target;
+    setMapInstance(map);
   }, [setMapInstance]);
 
   // Re-order layers after style change to ensure zones render above satellite tiles
@@ -335,7 +331,7 @@ const MapArea = ({
     const map = mapRef.current.getMap();
     const reorder = () => {
       try {
-        const layerOrder = ['zones-fill', 'zones-line', 'approach-sides-glow', 'approach-sides-dash', 'draft-fill', 'draft-line', 'cursor-layer'];
+        const layerOrder = ['zones-fill', 'zones-line', 'approach-sides-glow', 'approach-sides-dash', 'draft-fill', 'draft-line', 'cursor-layer', TRAFFIC_THREE_LAYER_ID];
         layerOrder.forEach(id => {
           if (map.getLayer(id)) map.moveLayer(id);
         });
@@ -350,6 +346,93 @@ const MapArea = ({
       setMapInstance(mapRef.current.getMap());
     }
   }, [setMapInstance]);
+
+  useEffect(() => {
+    if (!mapInstance) return;
+    const map = mapInstance;
+    let cancelled = false;
+
+    const ensureTrafficLayer = () => {
+      if (cancelled) return;
+      if (!map.addLayer || !map.getLayer) return;
+      if (!trafficLayerRef.current) {
+        trafficLayerRef.current = createTrafficAssetsLayer({
+          map,
+          onDeleteAsset: (assetId) => onAssetRemoveRef.current?.(assetId),
+        });
+      }
+
+      try {
+        if (!map.getLayer(TRAFFIC_THREE_LAYER_ID)) {
+          map.addLayer(trafficLayerRef.current);
+        }
+        trafficLayerRef.current.setData(trafficDataRef.current);
+      } catch (_) {
+        // The style can be between teardown and load during map-style switches.
+      }
+    };
+
+    ensureTrafficLayer();
+    map.on('style.load', ensureTrafficLayer);
+    return () => {
+      cancelled = true;
+      try {
+        map.off?.('style.load', ensureTrafficLayer);
+        if (map.getLayer?.(TRAFFIC_THREE_LAYER_ID)) {
+          map.removeLayer(TRAFFIC_THREE_LAYER_ID);
+        }
+      } catch (_) {
+        // MapLibre can clear its style before React effect cleanup runs.
+      }
+      trafficLayerRef.current?.dispose?.();
+      trafficLayerRef.current = null;
+    };
+  }, [mapInstance]);
+
+  useEffect(() => {
+    trafficDataRef.current = { zones, activeZoneId };
+    if (trafficLayerRef.current?.setData) {
+      const activeZone = (zones || []).find(z => z.id === activeZoneId);
+      const assetCount = activeZone?.placedAssets?.length || 0;
+      
+      // AGGRESSIVE UI DIAGNOSTIC: Force a toast if we receive assets
+      if (assetCount > 0 && !window.__hasToastedAssets) {
+        showToast(`DEBUG: MapArea received ${assetCount} assets!`);
+        window.__hasToastedAssets = true;
+      }
+      
+      console.log(`[MAP AREA] Pushing Data to 3D Layer. Active Zone: ${activeZoneId}, Assets: ${assetCount}`);
+      trafficLayerRef.current.setData({ zones, activeZoneId });
+    }
+  }, [zones, activeZoneId, showToast]);
+
+  // Dynamically find the first symbol (label) layer in the MapTiler style,
+  // so we can insert the Esri satellite raster layer underneath it.
+  // This allows place labels and custom 3D building holograms to render on top of 
+  // the satellite photos while hiding dark vector landuse and road backgrounds.
+  useEffect(() => {
+    if (!mapInstance) return;
+    const map = mapInstance;
+    const updateFirstLayer = () => {
+      try {
+        const layers = map.getStyle().layers;
+        if (layers && layers.length > 0) {
+          const firstSymbol = layers.find(l => l.type === 'symbol');
+          if (firstSymbol) {
+            setFirstStyleLayerId(firstSymbol.id);
+          }
+        }
+      } catch (_) {}
+    };
+
+    updateFirstLayer();
+    map.on('style.load', updateFirstLayer);
+    map.on('styledata', updateFirstLayer);
+    return () => {
+      map.off('style.load', updateFirstLayer);
+      map.off('styledata', updateFirstLayer);
+    };
+  }, [mapInstance]);
 
   useEffect(() => {
     const clearDraftSources = () => {
@@ -421,39 +504,7 @@ const MapArea = ({
     }
   }, [drawSessionKey, onUpdatePointCount]);
 
-  // Persistent Assets Component
-  const RenderedAssets = useMemo(() => {
-    return zones.flatMap(z => (z.placedAssets || []).map(asset => {
-      const cfg = ASSET_CONFIG[asset.type] || { icon: MapPin, color: '#94a3b8', shape: 'circle' };
-      const Icon = cfg.icon;
-      const isActive = z.id === activeZoneId;
-      
-      const getShapeStyle = () => {
-        const base = {
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          width: '28px', height: '28px', cursor: 'pointer',
-          background: cfg.color, color: 'white', border: '2px solid white',
-          boxShadow: '0 3px 6px rgba(0,0,0,0.3)', transition: 'all 0.2s',
-          transform: `rotate(${asset.rotation}deg)`
-        };
-        if (cfg.shape === 'circle') return { ...base, borderRadius: '50%' };
-        if (cfg.shape === 'rect') return { ...base, borderRadius: '4px' };
-        if (cfg.shape === 'diamond') return { ...base, transform: `rotate(${45 + (asset.rotation || 0)}deg)`, borderRadius: '2px' };
-        if (cfg.shape === 'octagon') return { ...base, clipPath: 'polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)' };
-        return base;
-      };
 
-      return (
-        <Marker key={asset.id} longitude={asset.lng} latitude={asset.lat} anchor="center">
-          <div style={getShapeStyle()} onClick={(e) => { e.stopPropagation(); isActive ? onAssetRemove?.(asset.id) : onSelectZone?.(z.id); }} title={asset.type}>
-            <div style={{ transform: cfg.shape === 'diamond' ? 'rotate(-45deg)' : 'none' }}>
-              <Icon size={16} strokeWidth={2.5} />
-            </div>
-          </div>
-        </Marker>
-      );
-    }));
-  }, [zones, activeZoneId, onAssetRemove, onSelectZone]);
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', pointerEvents: isExporting ? 'none' : 'auto' }}>
@@ -477,7 +528,7 @@ const MapArea = ({
         
         {mapStyle === 'satellite' && (
           <Source id="esri-world-imagery" type="raster" tiles={['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}']} tileSize={256} minzoom={1} maxzoom={19} attribution="Esri">
-            <Layer id="esri-world-imagery-layer" type="raster" />
+            <Layer id="esri-world-imagery-layer" type="raster" beforeId={firstStyleLayerId} />
           </Source>
         )}
 
@@ -516,7 +567,7 @@ const MapArea = ({
           <Layer id="cursor-layer" type="symbol" layout={{ 'text-field': '+', 'text-size': 24, 'text-font': ['Noto Sans Bold'], 'text-allow-overlap': true, 'text-ignore-placement': true }} paint={{ 'text-color': isSnapEnabled ? '#10b981' : '#0ea5e9', 'text-halo-color': '#fff', 'text-halo-width': 2 }} />
         </Source>
 
-        {RenderedAssets}
+
 
         {clickPing && (
           <Marker longitude={clickPing.lng} latitude={clickPing.lat} anchor="center">

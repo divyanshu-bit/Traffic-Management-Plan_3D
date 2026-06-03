@@ -100,7 +100,7 @@ export const generatePerimeterAssets = (coords, shapeType = 'polygon', approachI
   const trySnap = (lat, lng, radius = 12) => {
     if (!roadCollection || !roadCollection.features?.length) return { lat, lng };
     const snapped = snapToRoads([lat, lng], roadCollection, radius);
-    return snapped ? { lat: snapped[0], lng: snapped[1] } : { lat, lng };
+    return snapped ? { lat: snapped.point[0], lng: snapped.point[1] } : { lat, lng };
   };
 
   const offsetRoadRight = (snappedLat, snappedLng, roadCollection) => {
@@ -376,22 +376,54 @@ const App = () => {
     isAuthenticated, isLoading, login, logout
   } = useMRAuth();
 
-  const {
-    projectName, permitNumber, contractorName, clientName,
-    startDate, endDate, superintendent, safetyOfficer, emergencyContact,
-    setProjectField,
-    zones, setZones, activeZoneId, setActiveZoneId, getActiveZone,
-    updateActiveZone, updateZone, addZone, deleteZone, renameZone,
-    isWazeSync, setIsWazeSync, incidents, setIncidents,
-    isGenerating, setIsGenerating, genProgress, setGenProgress,
-    saveStatus, setSaveStatus,
-    activeTool, setActiveTool, isSnapEnabled, setIsSnapEnabled,
-    roadCollection, setRoadCollection,
-    drawPointCount, setDrawPointCount,
-    history, redoStack, pushUndo, undo, redo,
-    isSidebarOpen, setIsSidebarOpen,
-    showOnboarding, setShowOnboarding
-  } = useStore();
+  // Granular store selectors to prevent the entire Dashboard from re-rendering
+  // on every minor state change (like drawPointCount or metadata updates).
+  const projectName = useStore(s => s.projectName);
+  const permitNumber = useStore(s => s.permitNumber);
+  const contractorName = useStore(s => s.contractorName);
+  const clientName = useStore(s => s.clientName);
+  const startDate = useStore(s => s.startDate);
+  const endDate = useStore(s => s.endDate);
+  const superintendent = useStore(s => s.superintendent);
+  const safetyOfficer = useStore(s => s.safetyOfficer);
+  const emergencyContact = useStore(s => s.emergencyContact);
+
+  const zones = useStore(s => s.zones);
+  const activeZoneId = useStore(s => s.activeZoneId);
+  const activeTool = useStore(s => s.activeTool);
+  const isSnapEnabled = useStore(s => s.isSnapEnabled);
+  const roadCollection = useStore(s => s.roadCollection);
+  const isSidebarOpen = useStore(s => s.isSidebarOpen);
+  const showOnboarding = useStore(s => s.showOnboarding);
+  const history = useStore(s => s.history);
+  const redoStack = useStore(s => s.redoStack);
+  const isWazeSync = useStore(s => s.isWazeSync);
+  const incidents = useStore(s => s.incidents);
+
+  // Action selectors (these don't trigger re-renders as they are stable)
+  const setProjectField = useStore(s => s.setProjectField);
+  const setZones = useStore(s => s.setZones);
+  const setActiveZoneId = useStore(s => s.setActiveZoneId);
+  const getActiveZone = useStore(s => s.getActiveZone);
+  const updateActiveZone = useStore(s => s.updateActiveZone);
+  const updateZone = useStore(s => s.updateZone);
+  const addZone = useStore(s => s.addZone);
+  const deleteZone = useStore(s => s.deleteZone);
+  const renameZone = useStore(s => s.renameZone);
+  const setIsWazeSync = useStore(s => s.setIsWazeSync);
+  const setIncidents = useStore(s => s.setIncidents);
+  const setIsGenerating = useStore(s => s.setIsGenerating);
+  const setGenProgress = useStore(s => s.setGenProgress);
+  const setSaveStatus = useStore(s => s.setSaveStatus);
+  const setActiveTool = useStore(s => s.setActiveTool);
+  const setIsSnapEnabled = useStore(s => s.setIsSnapEnabled);
+  const setRoadCollection = useStore(s => s.setRoadCollection);
+  const setDrawPointCount = useStore(s => s.setDrawPointCount);
+  const pushUndo = useStore(s => s.pushUndo);
+  const undo = useStore(s => s.undo);
+  const redo = useStore(s => s.redo);
+  const setIsSidebarOpen = useStore(s => s.setIsSidebarOpen);
+  const setShowOnboarding = useStore(s => s.setShowOnboarding);
 
   const [toast, setToast] = useState(null);
   const showToast = useCallback((msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); }, []);
@@ -421,8 +453,11 @@ const App = () => {
   const activeZone = getActiveZone();
 
   // Auto-regenerate active zone assets when properties affecting layout change (if plan has already been generated)
+  // Debounced to avoid heavy calculations during vertex dragging.
   useEffect(() => {
-    if (activeZone?.hasGenerated && activeZone?.coords?.length) {
+    if (!activeZone?.hasGenerated || !activeZone?.coords?.length) return;
+
+    const timer = setTimeout(() => {
       const autoCones = generatePerimeterAssets(
         activeZone.coords,
         activeZone.shapeType,
@@ -432,15 +467,20 @@ const App = () => {
         roadCollection
       );
 
-      const existingNonAuto = activeZone.placedAssets?.filter(a => a.source !== 'auto') || [];
+      const currentZone = useStore.getState().getActiveZone();
+      if (!currentZone) return;
+
+      const existingNonAuto = currentZone.placedAssets?.filter(a => a.source !== 'auto') || [];
       const newPlacedAssets = [...existingNonAuto, ...autoCones];
 
       const serializeAssets = (arr) => JSON.stringify(arr.map(a => ({ type: a.type, lat: a.lat, lng: a.lng })));
       
-      if (serializeAssets(newPlacedAssets) !== serializeAssets(activeZone.placedAssets || [])) {
+      if (serializeAssets(newPlacedAssets) !== serializeAssets(currentZone.placedAssets || [])) {
         updateActiveZone({ placedAssets: newPlacedAssets });
       }
-    }
+    }, 300);
+
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     activeZone?.coords,
@@ -459,9 +499,10 @@ const App = () => {
     if (saved) {
       try {
         const d = JSON.parse(saved);
-        if (d.zones?.length && d.zones[0].placedAssets.length > 5) { 
+        if (d.zones?.length) { 
           setZones(d.zones); 
           if (d.activeZoneId) setActiveZoneId(d.activeZoneId); 
+          else setActiveZoneId(d.zones[0].id);
         }
         if (d.projectName) setProjectField('projectName', d.projectName);
         if (d.permitNumber) setProjectField('permitNumber', d.permitNumber);
@@ -489,7 +530,7 @@ const App = () => {
 
   const handleToolSelect = useCallback((tool) => { setActiveTool(tool); if (tool?.startsWith('draw-')) setDrawSessionKey(k => k + 1); }, [setActiveTool]);
   const handleClear = useCallback(() => { if (!activeZone) return; pushUndo(); updateActiveZone({ coords: [], placedAssets: [], hasGenerated: false }); showToast('Zone cleared'); }, [activeZone, pushUndo, updateActiveZone, showToast]);
-  const handleAssetRemove = useCallback((id) => { updateActiveZone({ placedAssets: activeZone.placedAssets.filter(a => a.id !== id) }); }, [activeZone?.placedAssets, updateActiveZone]);
+  const handleAssetRemove = useCallback((id) => { if (!activeZone) return; updateActiveZone({ placedAssets: (activeZone.placedAssets || []).filter(a => a.id !== id) }); }, [activeZone, updateActiveZone]);
 
   const handleGenerate = useCallback(async () => {
     if (!activeZone?.coords?.length) return showToast('Draw a boundary first');
@@ -522,10 +563,11 @@ const App = () => {
   }, [activeZone?.name, updateActiveZone, setActiveTool, setDrawPointCount, showToast]);
 
   const handleSetPlacedAssets = useCallback((updater) => {
-    const currentAssets = activeZone.placedAssets;
+    if (!activeZone) return;
+    const currentAssets = activeZone.placedAssets || [];
     const nextAssets = typeof updater === 'function' ? updater(currentAssets) : updater;
     updateActiveZone({ placedAssets: nextAssets });
-  }, [activeZone.placedAssets, updateActiveZone]);
+  }, [activeZone, updateActiveZone]);
 
   const handleUpdatePointCount = useCallback((count) => setDrawPointCount(count), [setDrawPointCount]);
 

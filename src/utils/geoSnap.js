@@ -153,13 +153,13 @@ export const getRoadOrientation = (point, roadFeature) => {
  * @param {Array<number>} point           - [lat, lon]
  * @param {Object}        roadCollection  - GeoJSON FeatureCollection
  * @param {number}        maxDistanceMeters
- * @returns {Array<number>|null} Snapped [lat, lon], or null if nothing is close enough
+ * @returns {Object|null} { point: [lat, lon], road: Object } or null if nothing is close enough
  */
 export const snapToRoads = (point, roadCollection, maxDistanceMeters = 20) => {
   if (!roadCollection || roadCollection.features.length === 0) return null;
 
   const turfPoint = turf.point([point[1], point[0]]); // [lon, lat]
-  let closestPoint = null;
+  let closestResult = null;
   let minDistance = Infinity;
 
   roadCollection.features.forEach(feature => {
@@ -182,8 +182,10 @@ export const snapToRoads = (point, roadCollection, maxDistanceMeters = 20) => {
         const distance = snapped.properties.dist;
         if (distance < minDistance && distance <= maxDistanceMeters) {
           minDistance = distance;
-          // Return [lat, lon] to match the convention used by callers
-          closestPoint = [snapped.geometry.coordinates[1], snapped.geometry.coordinates[0]];
+          closestResult = {
+            point: [snapped.geometry.coordinates[1], snapped.geometry.coordinates[0]],
+            road: feature
+          };
         }
       } catch {
         // A malformed segment should not crash the entire snap pass
@@ -191,5 +193,5 @@ export const snapToRoads = (point, roadCollection, maxDistanceMeters = 20) => {
     });
   });
 
-  return closestPoint;
+  return closestResult;
 };
