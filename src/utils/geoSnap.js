@@ -123,24 +123,20 @@ export const getRoadOrientation = (point, roadFeature) => {
 
     if (!line) return 0;
 
-    const lineCoords = line.geometry.coordinates;
-    const snapped = turf.nearestPointOnLine(line, turfPoint);
+    const length = turf.length(line, { units: 'kilometers' });
+    const snapped = turf.nearestPointOnLine(line, turfPoint, { units: 'kilometers' });
+    const loc = snapped.properties.location;
 
-    // Find the segment the snapped point sits on
-    let bestSegmentIdx = 0;
-    let minDist = Infinity;
-    for (let i = 0; i < lineCoords.length - 1; i++) {
-      const seg = turf.lineString([lineCoords[i], lineCoords[i + 1]]);
-      const d = turf.pointToLineDistance(snapped, seg, { units: 'meters' });
-      if (d < minDist) {
-        minDist = d;
-        bestSegmentIdx = i;
-      }
-    }
+    // Take points 2 meters (0.002 km) ahead and 2 meters behind to form a smooth mathematical tangent
+    const distBack = Math.max(0, loc - 0.002);
+    const distFwd = Math.min(length, loc + 0.002);
 
-    const p1 = turf.point(lineCoords[bestSegmentIdx]);
-    const p2 = turf.point(lineCoords[bestSegmentIdx + 1]);
-    return turf.bearing(p1, p2);
+    if (distFwd === distBack) return 0;
+
+    const pBack = turf.along(line, distBack, { units: 'kilometers' });
+    const pFwd = turf.along(line, distFwd, { units: 'kilometers' });
+
+    return turf.bearing(pBack, pFwd);
   } catch (e) {
     console.warn('[geoSnap] Orientation calculation failed:', e);
     return 0;
@@ -153,7 +149,7 @@ export const getRoadOrientation = (point, roadFeature) => {
  * @param {Array<number>} point           - [lat, lon]
  * @param {Object}        roadCollection  - GeoJSON FeatureCollection
  * @param {number}        maxDistanceMeters
- * @returns {Object|null} { point: [lat, lon], road: Object } or null if nothing is close enough
+ * @returns {Object|null} { point: [lat, lon], road: Object, line: Object, location: number } or null if nothing is close enough
  */
 export const snapToRoads = (point, roadCollection, maxDistanceMeters = 20) => {
   if (!roadCollection || roadCollection.features.length === 0) return null;
@@ -182,9 +178,15 @@ export const snapToRoads = (point, roadCollection, maxDistanceMeters = 20) => {
         const distance = snapped.properties.dist;
         if (distance < minDistance && distance <= maxDistanceMeters) {
           minDistance = distance;
+          
+          // Also get location in kilometers for potential path routing
+          const snappedKm = turf.nearestPointOnLine(line, turfPoint, { units: 'kilometers' });
+          
           closestResult = {
             point: [snapped.geometry.coordinates[1], snapped.geometry.coordinates[0]],
-            road: feature
+            road: feature,
+            line: line,
+            location: snappedKm.properties.location
           };
         }
       } catch {
@@ -194,4 +196,113 @@ export const snapToRoads = (point, roadCollection, maxDistanceMeters = 20) => {
   });
 
   return closestResult;
+};
+
+const graphCache = new WeakMap();
+
+/**
+ * Builds a local routing graph from the road collection and finds the shortest
+ * path between two coordinates, crossing multiple OSM segments if necessary.
+ *
+ * @param {Array<number>} startCoord      - [lon, lat]
+ * @param {Array<number>} endCoord        - [lon, lat]
+ * @param {Object}        roadCollection  - GeoJSON FeatureCollection
+ * @param {number}        maxSearchDist   - Max routing distance in meters
+ * @returns {Array<Array<number>>|null} Array of [lon, lat] points forming the path
+ */
+export const findPathInNetwork = (startCoord, endCoord, roadCollection, maxSearchDist = 2500) => {
+  if (!roadCollection || !roadCollection.features) return null;
+  
+  let cacheEntry = graphCache.get(roadCollection);
+  
+  if (!cacheEntry) {
+    const graph = {};
+    const exactCoords = {}; // Store the exact coordinates for path reconstruction
+    
+    const addEdge = (pA, pB) => {
+      const kA = `${pA[0].toFixed(5)},${pA[1].toFixed(5)}`;
+      const kB = `${pB[0].toFixed(5)},${pB[1].toFixed(5)}`;
+      if (kA === kB) return;
+      
+      if (!exactCoords[kA]) exactCoords[kA] = pA;
+      if (!exactCoords[kB]) exactCoords[kB] = pB;
+      
+      const d = turf.distance(pA, pB, { units: 'meters' });
+      if (!graph[kA]) graph[kA] = [];
+      if (!graph[kB]) graph[kB] = [];
+      
+      if (!graph[kA].some(e => e.node === kB)) {
+        graph[kA].push({ node: kB, dist: d });
+        graph[kB].push({ node: kA, dist: d });
+      }
+    };
+
+    roadCollection.features.forEach(feat => {
+      if (feat.properties?.isBuilding || feat.properties?.isObstacle) return;
+      if (feat.geometry.type === 'LineString') {
+        const coords = feat.geometry.coordinates;
+        for (let i = 0; i < coords.length - 1; i++) addEdge(coords[i], coords[i + 1]);
+      } else if (feat.geometry.type === 'MultiLineString') {
+        feat.geometry.coordinates.forEach(line => {
+           for (let i = 0; i < line.length - 1; i++) addEdge(line[i], line[i + 1]);
+        });
+      }
+    });
+    
+    cacheEntry = { graph, exactCoords };
+    graphCache.set(roadCollection, cacheEntry);
+  }
+
+  const { graph, exactCoords } = cacheEntry;
+
+  let startNode = null, endNode = null;
+  let minStartD = Infinity, minEndD = Infinity;
+
+  Object.keys(graph).forEach(k => {
+    const pt = exactCoords[k];
+    const ds = turf.distance(startCoord, pt, { units: 'meters' });
+    const de = turf.distance(endCoord, pt, { units: 'meters' });
+    if (ds < minStartD) { minStartD = ds; startNode = k; }
+    if (de < minEndD) { minEndD = de; endNode = k; }
+  });
+
+  // Increased abort tolerance to allow routing on long segments (from 80m to 300m)
+  if (!startNode || !endNode || minStartD > 300 || minEndD > 300) return null;
+
+  const distances = { [startNode]: 0 };
+  const previous = { [startNode]: null };
+  const pq = [{ node: startNode, dist: 0 }];
+  const visited = new Set();
+
+  while (pq.length > 0) {
+    pq.sort((a, b) => a.dist - b.dist);
+    const { node: u } = pq.shift();
+    
+    if (u === endNode) break;
+    if (visited.has(u)) continue;
+    visited.add(u);
+
+    if (distances[u] > maxSearchDist) continue;
+
+    (graph[u] || []).forEach(neighbor => {
+      const v = neighbor.node;
+      const alt = distances[u] + neighbor.dist;
+      if (distances[v] === undefined || alt < distances[v]) {
+        distances[v] = alt;
+        previous[v] = u;
+        pq.push({ node: v, dist: alt });
+      }
+    });
+  }
+
+  if (previous[endNode] === undefined) return null;
+
+  const path = [];
+  let curr = endNode;
+  while (curr) {
+    path.unshift(exactCoords[curr]);
+    curr = previous[curr];
+  }
+
+  return path;
 };

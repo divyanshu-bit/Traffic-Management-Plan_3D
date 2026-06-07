@@ -147,7 +147,7 @@ const FloatingDock = ({ onClear, showToast }) => {
                     onClick={()=>{setActiveTool(item.type);setShowSignPanel(false);}}
                   >
                     <span className="sign-item-icon" style={{color: item.color}}>
-                      {item.icon ? <item.icon size={24} /> : <span style={{fontSize: 14, fontWeight: 900, color: '#000'}}>{item.label}</span>}
+                      {item.icon ? <item.icon size={30} /> : <span style={{fontSize: 22, fontWeight: 900, color: item.color}}>{item.label}</span>}
                     </span>
                     <span className="sign-item-label">{item.label}</span>
                   </button>

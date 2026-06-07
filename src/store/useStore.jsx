@@ -144,33 +144,97 @@ const useStore = create((set, get) => ({
   setSaveStatus: (val) => set({ saveStatus: val }),
   isExporting: false,
   setIsExporting: (val) => set({ isExporting: val }),
+  isSimulating: false,
+  setIsSimulating: (val) => set({ isSimulating: val }),
+  simSpeed: 1.35,
+  setSimSpeed: (val) => set({ simSpeed: val }),
+  simProgress: 0,
+  setSimProgress: (val) => set({ simProgress: val }),
+  simIsPaused: false,
+  setSimIsPaused: (val) => set({ simIsPaused: val }),
+  selectedAssetId: null,
+  setSelectedAssetId: (id) => set({ selectedAssetId: id }),
+
+  sidebarPhase: 1,
+  setSidebarPhase: (val) => set({ sidebarPhase: val }),
 
   // History management
   history: [],
   redoStack: [],
   pushUndo: () => {
-    const { zones } = get();
+    const s = get();
+    const snapshot = {
+      zones: s.zones,
+      activeZoneId: s.activeZoneId,
+      sidebarPhase: s.sidebarPhase,
+      projectName: s.projectName,
+      permitNumber: s.permitNumber,
+      contractorName: s.contractorName,
+      clientName: s.clientName,
+      startDate: s.startDate,
+      endDate: s.endDate,
+      workingHours: s.workingHours,
+      nightWork: s.nightWork,
+      superintendent: s.superintendent,
+      safetyOfficer: s.safetyOfficer,
+      emergencyContact: s.emergencyContact,
+      customLogo: s.customLogo
+    };
     set((state) => ({
-      history: [...state.history.slice(-19), zones],
+      history: [...state.history.slice(-19), snapshot],
       redoStack: []
     }));
   },
   undo: () => set((state) => {
     if (state.history.length === 0) return state;
+    const current = {
+      zones: state.zones,
+      activeZoneId: state.activeZoneId,
+      sidebarPhase: state.sidebarPhase,
+      projectName: state.projectName,
+      permitNumber: state.permitNumber,
+      contractorName: state.contractorName,
+      clientName: state.clientName,
+      startDate: state.startDate,
+      endDate: state.endDate,
+      workingHours: state.workingHours,
+      nightWork: state.nightWork,
+      superintendent: state.superintendent,
+      safetyOfficer: state.safetyOfficer,
+      emergencyContact: state.emergencyContact,
+      customLogo: state.customLogo
+    };
     const previous = state.history[state.history.length - 1];
     return {
-      redoStack: [state.zones, ...state.redoStack.slice(0, 19)],
+      redoStack: [current, ...state.redoStack.slice(0, 19)],
       history: state.history.slice(0, -1),
-      zones: previous
+      ...previous
     };
   }),
   redo: () => set((state) => {
     if (state.redoStack.length === 0) return state;
+    const current = {
+      zones: state.zones,
+      activeZoneId: state.activeZoneId,
+      sidebarPhase: state.sidebarPhase,
+      projectName: state.projectName,
+      permitNumber: state.permitNumber,
+      contractorName: state.contractorName,
+      clientName: state.clientName,
+      startDate: state.startDate,
+      endDate: state.endDate,
+      workingHours: state.workingHours,
+      nightWork: state.nightWork,
+      superintendent: state.superintendent,
+      safetyOfficer: state.safetyOfficer,
+      emergencyContact: state.emergencyContact,
+      customLogo: state.customLogo
+    };
     const next = state.redoStack[0];
     return {
-      history: [...state.history, state.zones],
+      history: [...state.history, current],
       redoStack: state.redoStack.slice(1),
-      zones: next
+      ...next
     };
   }),
 
