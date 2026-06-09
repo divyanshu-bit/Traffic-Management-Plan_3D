@@ -23,9 +23,19 @@ import {
   RotateCcw,
   Timer,
   ChevronsLeft,
-  ChevronsRight
+  ChevronsRight,
+  HelpCircle
 } from 'lucide-react';
 import useStore from '../store/useStore';
+
+const BoomGateIcon = ({ size = 20, color = "currentColor" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="16" width="4" height="6" rx="1" />
+    <path d="M7 18h14" />
+    <path d="M7 18l14-4" opacity="0.5" />
+    <circle cx="7" cy="18" r="1" fill={color} />
+  </svg>
+);
 
 const SIGN_LIBRARY = {
   'Warning': [
@@ -44,7 +54,7 @@ const SIGN_LIBRARY = {
   ],
   'Control': [
     { type:'cone',   icon: TrafficCone, label:'Traffic Cone', color: '#f97316' },
-    { type:'barrier',icon: Square,      label:'Water Barrier', color: '#3b82f6' },
+    { type:'boomgate',icon: BoomGateIcon, label:'Boom Gate', color: '#ef4444' },
     { type:'truck',  icon: Truck,       label:'TMA Truck', color: '#8b5cf6' },
     { type:'sign',   icon: Construction,label:'Signal', color: '#eab308' },
   ],
@@ -58,7 +68,7 @@ const SIGN_LIBRARY = {
 
 const drawEvent = (name) => window.dispatchEvent(new CustomEvent(name));
 
-const FloatingDock = ({ onClear, showToast }) => {
+const FloatingDock = ({ onClear, showToast, onToggleHelp, showHelp, hasOpenedHelp }) => {
   const {
     activeTool, setActiveTool, isSnapEnabled, setIsSnapEnabled,
     undo, redo, history, redoStack, drawPointCount, getActiveZone, zones
@@ -209,8 +219,8 @@ const FloatingDock = ({ onClear, showToast }) => {
               <button className={`dock-btn ${activeTool==='cone'?'active':''}`} data-tooltip="Traffic Cone" onClick={()=>setActiveTool('cone')}>
                 <span className="dock-icon"><TrafficCone size={20} color="#f97316" /></span><span className="dock-label">Cone</span>
               </button>
-              <button className={`dock-btn ${activeTool==='barrier'?'active':''}`} data-tooltip="Water Barrier" onClick={()=>setActiveTool('barrier')}>
-                <span className="dock-icon"><Square size={20} color="#3b82f6" /></span><span className="dock-label">Barrier</span>
+              <button className={`dock-btn ${activeTool==='boomgate'?'active':''}`} data-tooltip="Boom Gate" onClick={()=>setActiveTool('boomgate')}>
+                <span className="dock-icon"><BoomGateIcon size={20} color="#ef4444" /></span><span className="dock-label">Gate</span>
               </button>
               <button className={`dock-btn ${activeTool==='truck'?'active':''}`} data-tooltip="TMA Truck" onClick={()=>setActiveTool('truck')}>
                 <span className="dock-icon"><Truck size={20} color="#8b5cf6" /></span><span className="dock-label">TMA</span>
@@ -228,6 +238,9 @@ const FloatingDock = ({ onClear, showToast }) => {
               </button>
               <button className="dock-btn" onClick={redo} disabled={!canRedo} data-tooltip="Redo (Ctrl+Y)" style={{color:canRedo?'#94a3b8':'#334155'}}>
                 <span className="dock-icon"><Redo2 size={18} /></span><span className="dock-label">Redo</span>
+              </button>
+              <button className={`dock-btn ${showHelp ? 'active' : ''} ${!hasOpenedHelp ? 'help-pulse' : ''}`} onClick={onToggleHelp} data-tooltip="Quick Help (?)">
+                <span className="dock-icon"><HelpCircle size={18} color={showHelp ? '#000' : '#38bdf8'} /></span><span className="dock-label">Help</span>
               </button>
               <button className="dock-btn" onClick={onClear} data-tooltip="Clear Zone" style={{color:'#f87171'}}>
                 <span className="dock-icon"><Trash2 size={18} /></span><span className="dock-label">Clear</span>

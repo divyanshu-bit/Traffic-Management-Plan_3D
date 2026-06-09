@@ -32,8 +32,11 @@ const useStore = create((set, get) => ({
   setIsAuthenticated: (val) => set({ isAuthenticated: val }),
   isLoading: false,
   setIsLoading: (val) => set({ isLoading: val }),
-  showOnboarding: true,
-  setShowOnboarding: (val) => set({ showOnboarding: val }),
+  showOnboarding: localStorage.getItem('mr_onboarding_complete') !== 'true',
+  setShowOnboarding: (val) => {
+    if (val === false) localStorage.setItem('mr_onboarding_complete', 'true');
+    set({ showOnboarding: val });
+  },
   isSidebarOpen: true,
   setIsSidebarOpen: (val) => set((state) => ({ isSidebarOpen: typeof val === 'function' ? val(state.isSidebarOpen) : val })),
 

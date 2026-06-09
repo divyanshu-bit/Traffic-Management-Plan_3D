@@ -12,6 +12,7 @@ const MemoizedMapArea = React.memo(MapArea);
 const MemoizedSidebar = React.memo(Sidebar);
 const MemoizedFloatingDock = React.memo(FloatingDock);
 import OnboardingOverlay from './OnboardingOverlay';
+import HelpModal from './HelpModal';
 import { snapToRoads, fetchRoadVectors } from '../utils/geoSnap';
 
 import LoginScreen from './login/LoginScreen';
@@ -485,6 +486,27 @@ const App = () => {
   const [toast, setToast] = useState(null);
   const showToast = useCallback((msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); }, []);
 
+  const [showHelp, setShowHelp] = useState(false);
+  const [hasOpenedHelp, setHasOpenedHelp] = useState(false);
+  const [tipsShown, setTipsShown] = useState({ asset: false, draw: false });
+
+  const toggleHelp = useCallback(() => {
+    setShowHelp(v => !v);
+    setHasOpenedHelp(true);
+  }, []);
+
+  // Contextual Pro-Tips Logic
+  useEffect(() => {
+    if (activeTool && !tipsShown.asset && !activeTool.startsWith('draw-')) {
+      showToast('Tip: Left-click to place, click an asset to remove!');
+      setTipsShown(prev => ({ ...prev, asset: true }));
+    }
+    if (activeTool?.startsWith('draw-') && !tipsShown.draw) {
+      showToast('Tip: Ctrl+Z undoes your last point!');
+      setTipsShown(prev => ({ ...prev, draw: true }));
+    }
+  }, [activeTool, tipsShown, showToast]);
+
   const reportId = useRef(`TMP-${Math.random().toString(36).substr(2, 9).toUpperCase()}`);
   const [planRestoredMsg, setPlanRestoredMsg] = useState(null);
 
@@ -695,8 +717,12 @@ const App = () => {
         <FloatingDock
           onClear={handleClear}
           showToast={showToast}
+          onToggleHelp={toggleHelp}
+          showHelp={showHelp}
+          hasOpenedHelp={hasOpenedHelp}
         />
         {showOnboarding && <OnboardingOverlay onDismiss={() => setShowOnboarding(false)} />}
+        {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
       </div>
     </ErrorBoundary>
   );

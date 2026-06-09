@@ -41,34 +41,36 @@ const ASSET_MODELS = {
 
 // Target dimensions in metres for visibility (Exaggerated for CAD clarity)
 const ASSET_MAX_DIM_M = {
-  cone: 5.5,      // EXTREME VISIBILITY: Increased to 2.5m
-  barrier: 5.0,   // Exaggerated length
-  truck: 16.0,    // Exaggerated length
-  sign: 6.5,      // MATCH TRUCK: Increased height for relative visibility
-  light: 14.0,    // Increased height
-  flagger: 3.5,   // Personnel: Exaggerated for visibility
-  supervisor: 3.5,
-  marshal: 3.5,
-  firstaid: 4.5,  // Station: Slightly larger
+  cone: 2.0,      // Smallest but visible
+  barrier: 3.0,   // Real-world segment length
+  boomgate: 9.0,  // INCREASED: 9m arm for truck-scale dominance
+  truck: 15.0,    // Largest unit
+  sign: 8.5,      // INCREASED: Towering height for visibility
+  light: 14.0,    // Tallest unit
+  flagger: 4.0,   // Personnel: Exaggerated for visibility
+  supervisor: 4.0,
+  marshal: 4.0,
+  firstaid: 4.5,
 };
 
 const SIGN_DIMENSIONS_M = {
-  'sign-roadwork': { width: 4.0, height: 4.0, totalHeight: 6.5 },
-  'sign-merge': { width: 4.0, height: 4.0, totalHeight: 6.5 },
-  'sign-slow': { width: 4.0, height: 4.0, totalHeight: 6.5 },
-  'sign-menwork': { width: 4.0, height: 4.0, totalHeight: 6.5 },
-  'sign-stop': { width: 4.0, height: 4.0, totalHeight: 6.5 },
-  'sign-speed30': { width: 4.0, height: 4.0, totalHeight: 6.5 },
-  'sign-speed50': { width: 4.0, height: 4.0, totalHeight: 6.5 },
-  'sign-nopark': { width: 4.0, height: 4.0, totalHeight: 6.5 },
-  'sign-detour': { width: 5.0, height: 2.5, totalHeight: 6.5 },
-  'sign-endwork': { width: 5.0, height: 2.5, totalHeight: 6.5 },
+  'sign-roadwork': { width: 4.0, height: 4.0, totalHeight: 8.5 },
+  'sign-merge': { width: 4.0, height: 4.0, totalHeight: 8.5 },
+  'sign-slow': { width: 4.0, height: 4.0, totalHeight: 8.5 },
+  'sign-menwork': { width: 4.0, height: 4.0, totalHeight: 8.5 },
+  'sign-stop': { width: 4.0, height: 4.0, totalHeight: 8.5 },
+  'sign-speed30': { width: 4.0, height: 4.0, totalHeight: 8.5 },
+  'sign-speed50': { width: 4.0, height: 4.0, totalHeight: 8.5 },
+  'sign-nopark': { width: 4.0, height: 4.0, totalHeight: 8.5 },
+  'sign-detour': { width: 5.0, height: 2.5, totalHeight: 8.5 },
+  'sign-endwork': { width: 5.0, height: 2.5, totalHeight: 8.5 },
 };
 
 // Fallback colours shown when a GLB is missing or still has bad extensions.
 const FALLBACK_COLORS = {
   cone: 0xff6600,
-  barrier: 0xffcc00,
+  barrier: 0xf97316, // Safety Orange
+  boomgate: 0x111111, // Sleek Black
   truck: 0x2266cc,
   sign: 0xffffff,
   light: 0x00ff88,
@@ -390,10 +392,156 @@ function makeSignBillboard(type) {
 }
 
 // ---------------------------------------------------------------------------
+// Procedural Water Barrier – Realistic Jersey profile
+// ---------------------------------------------------------------------------
+function makeWaterBarrierMesh() {
+  const shape = new THREE.Shape();
+  // Jersey Barrier Profile (relative coordinates, centered on X)
+  shape.moveTo(-0.5, 0);
+  shape.lineTo(0.5, 0);
+  shape.lineTo(0.5, 0.15);
+  shape.lineTo(0.35, 0.25);
+  shape.lineTo(0.15, 0.9);
+  shape.lineTo(0.15, 1.0);
+  shape.lineTo(-0.15, 1.0);
+  shape.lineTo(-0.15, 0.9);
+  shape.lineTo(-0.35, 0.25);
+  shape.lineTo(-0.5, 0.15);
+  shape.lineTo(-0.5, 0);
+
+  const extrudeSettings = {
+    steps: 1,
+    depth: 2.5, // 2.5m segment
+    bevelEnabled: true,
+    bevelThickness: 0.05,
+    bevelSize: 0.05,
+    bevelOffset: 0,
+    bevelSegments: 3
+  };
+
+  const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+  geometry.center();
+  geometry.rotateX(Math.PI / 2); // Align with XZ plane
+
+  const material = new THREE.MeshStandardMaterial({
+    color: '#f97316', // Safety Orange
+    roughness: 0.3,
+    metalness: 0.1,
+  });
+
+  const mesh = new THREE.Mesh(geometry, material);
+  
+  // Add detail: top fill cap (small cylinder)
+  const capGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.05, 12);
+  const capMat = new THREE.MeshStandardMaterial({ color: '#334155', roughness: 0.5 });
+  const cap = new THREE.Mesh(capGeo, capMat);
+  cap.position.y = 0.52; 
+  mesh.add(cap);
+
+  mesh.userData.isProceduralBarrier = true;
+  return mesh;
+}
+
+// ---------------------------------------------------------------------------
+// Procedural Boom Gate – Site Access Control (SUPER-SIZED HEAVY DUTY)
+// ---------------------------------------------------------------------------
+function makeBoomGateMesh() {
+  const group = new THREE.Group();
+
+  // 1. Concrete Mounting Pad (Massive foundation)
+  const padGeo = new THREE.BoxGeometry(2.0, 0.25, 2.0);
+  const padMat = new THREE.MeshStandardMaterial({ color: '#94a3b8', roughness: 0.8 });
+  const pad = new THREE.Mesh(padGeo, padMat);
+  pad.position.y = 0.125;
+  group.add(pad);
+
+  // 2. Base Cabinet (Commanding Presence - Obsidian Black)
+  const baseGeo = new THREE.BoxGeometry(1.4, 2.4, 1.4);
+  const baseMat = new THREE.MeshStandardMaterial({ 
+    color: '#111111', // Obsidian Black
+    roughness: 0.1,
+    metalness: 0.8 
+  });
+  const base = new THREE.Mesh(baseGeo, baseMat);
+  base.position.y = 1.45; // Sitting on pad
+  group.add(base);
+
+  // 3. Control Panel Detail (Keypad/Screen)
+  const panelGeo = new THREE.BoxGeometry(0.1, 0.7, 0.6);
+  const panelMat = new THREE.MeshStandardMaterial({ color: '#1e293b', emissive: '#0ea5e9', emissiveIntensity: 0.6 });
+  const panel = new THREE.Mesh(panelGeo, panelMat);
+  panel.position.set(0.71, 1.8, 0);
+  group.add(panel);
+
+  // 4. Safety Beacon (Industrial Strobe)
+  const beaconGeo = new THREE.CylinderGeometry(0.18, 0.22, 0.3, 12);
+  const beaconMat = new THREE.MeshStandardMaterial({ 
+    color: '#ef4444', 
+    emissive: '#ef4444', 
+    emissiveIntensity: 3.0,
+    transparent: true,
+    opacity: 0.9
+  });
+  const beacon = new THREE.Mesh(beaconGeo, beaconMat);
+  beacon.position.y = 2.8;
+  group.add(beacon);
+
+  // 5. The Arm (Boom) - JUMBO TRUCK SCALE
+  const armLen = 9.0; 
+  const armGeo = new THREE.BoxGeometry(armLen, 0.35, 0.6); // Massive beam
+  
+  // Create SUPER-BOLD striped texture
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, 512, 128);
+  ctx.fillStyle = '#ef4444';
+  // Extra wide stripes
+  for (let i = 0; i < 4; i++) {
+    ctx.fillRect(i * 128, 0, 80, 128);
+  }
+  const stripeTex = new THREE.CanvasTexture(canvas);
+  stripeTex.repeat.set(1, 1);
+  stripeTex.wrapS = THREE.RepeatWrapping;
+
+  const armMat = new THREE.MeshStandardMaterial({ 
+    map: stripeTex,
+    roughness: 0.3,
+    metalness: 0.1
+  });
+  const arm = new THREE.Mesh(armGeo, armMat);
+  
+  // Position arm at pivot point (top of base)
+  arm.position.set(armLen/2 - 0.6, 2.0, 0);
+  arm.rotation.z = THREE.MathUtils.degToRad(10); // Slightly raised
+  group.add(arm);
+
+  // 6. Heavy-Duty Pivot Mechanism (Reinforced)
+  const pivotGeo = new THREE.CylinderGeometry(0.35, 0.35, 1.2, 16);
+  pivotGeo.rotateX(Math.PI/2);
+  const pivot = new THREE.Mesh(pivotGeo, new THREE.MeshStandardMaterial({ color: '#334155', metalness: 0.9 }));
+  pivot.position.set(0, 2.0, 0);
+  group.add(pivot);
+
+  // Pivot Central Bolt
+  const boltGeo = new THREE.CylinderGeometry(0.2, 0.2, 1.3, 12);
+  boltGeo.rotateX(Math.PI/2);
+  const boltMat = new THREE.MeshStandardMaterial({ color: '#cbd5e1', metalness: 1 });
+  const bolt = new THREE.Mesh(boltGeo, boltMat);
+  bolt.position.set(0, 2.0, 0);
+  group.add(bolt);
+
+  group.userData.isBoomGate = true;
+  return group;
+}
+
+// ---------------------------------------------------------------------------
 // createTrafficAssetsLayer
 // ---------------------------------------------------------------------------
 export function createTrafficAssetsLayer({ map, onDeleteAsset }) {
-  console.log('%c[OMNI-ARCHITECT] Initializing 3D Layer v2.1 (RBBC Active)', 'background: #0ea5e9; color: white; font-weight: bold; padding: 2px 5px; border-radius: 3px;');
+  console.log('%c[OMNI-ARCHITECT] Initializing 3D Layer v2.3 (Boom Gates Active)', 'background: #0ea5e9; color: white; font-weight: bold; padding: 2px 5px; border-radius: 3px;');
   
   let renderer = null;
   let scene = null;
@@ -415,6 +563,9 @@ export function createTrafficAssetsLayer({ map, onDeleteAsset }) {
   // Preload all model types
   const modelLoads = {};
   Object.entries(ASSET_MODELS).forEach(([type, url]) => {
+    // Skip procedural types
+    if (type === 'barrier' || type === 'boomgate') return;
+
     modelLoads[type] = new Promise((resolve) => {
       loader.load(
         url,
@@ -511,7 +662,7 @@ export function createTrafficAssetsLayer({ map, onDeleteAsset }) {
 
   // ---- Scene helpers -------------------------------------------------------
 
-const TYPE_PRIORITY = { truck: 3, barrier: 2, sign: 2, light: 2, cone: 1, supervisor: 1, flagger: 1 };
+const TYPE_PRIORITY = { truck: 3, boomgate: 2, barrier: 2, sign: 2, light: 2, cone: 1, supervisor: 1, flagger: 1 };
 
   function upsertMesh(asset) {
     const { id, type, lng, lat, rotation = 0 } = asset;
@@ -528,7 +679,7 @@ const TYPE_PRIORITY = { truck: 3, barrier: 2, sign: 2, light: 2, cone: 1, superv
       removeMesh(id);
     }
 
-    // --- SIGN ASSETS: use procedural billboard, bypass sign.glb entirely ---
+    // --- SIGN ASSETS: use procedural billboard ---
     if (type.startsWith('sign')) {
       if (objects[id]) {
         const { mesh } = objects[id];
@@ -536,7 +687,6 @@ const TYPE_PRIORITY = { truck: 3, barrier: 2, sign: 2, light: 2, cone: 1, superv
         mesh.rotation.set(0, THREE.MathUtils.degToRad(-rotation), 0);
         
         // Dynamic scale update for export
-        const baseWidth = (SIGN_DIMENSIONS_M[type] || SIGN_DIMENSIONS_M['sign-roadwork']).width;
         const currentScale = mesh.scale.x;
         if (Math.abs(currentScale - visibilityMultiplier) > 0.1) {
           mesh.scale.set(visibilityMultiplier, visibilityMultiplier, visibilityMultiplier);
@@ -560,7 +710,69 @@ const TYPE_PRIORITY = { truck: 3, barrier: 2, sign: 2, light: 2, cone: 1, superv
       return;
     }
 
-    // --- NON-SIGN ASSETS: use GLB model from meshCache ---
+    // --- BOOM GATE ASSETS ---
+    if (type === 'boomgate') {
+      if (objects[id]) {
+        const { mesh } = objects[id];
+        mesh.position.set(local.x, local.y, local.z);
+        mesh.rotation.set(0, THREE.MathUtils.degToRad(-rotation), 0);
+        
+        const forceS = getAutoCalibrationScale(mesh, ASSET_MAX_DIM_M['boomgate']) * visibilityMultiplier;
+        mesh.scale.set(forceS, forceS, forceS);
+
+        objects[id].data = asset;
+        return;
+      }
+
+      const mesh = makeBoomGateMesh();
+      mesh.position.set(local.x, local.y, local.z);
+      mesh.rotation.set(0, THREE.MathUtils.degToRad(-rotation), 0);
+      
+      const s = getAutoCalibrationScale(mesh, ASSET_MAX_DIM_M['boomgate']) * visibilityMultiplier;
+      mesh.scale.set(s, s, s);
+
+      mesh.traverse(child => {
+        child.frustumCulled = false;
+        child.userData = Object.assign(child.userData || {}, { assetId: id, type });
+      });
+      mesh.userData = Object.assign(mesh.userData || {}, { assetId: id, type });
+      scene.add(mesh);
+      objects[id] = { mesh, data: asset };
+      return;
+    }
+
+    // --- BARRIER ASSETS: use procedural Jersey barrier ---
+    if (type === 'barrier') {
+      if (objects[id]) {
+        const { mesh } = objects[id];
+        mesh.position.set(local.x, local.y, local.z);
+        mesh.rotation.set(0, THREE.MathUtils.degToRad(-rotation), 0);
+        
+        const forceS = getAutoCalibrationScale(mesh, ASSET_MAX_DIM_M['barrier']) * visibilityMultiplier;
+        mesh.scale.set(forceS, forceS, forceS);
+
+        objects[id].data = asset;
+        return;
+      }
+
+      const mesh = makeWaterBarrierMesh();
+      mesh.position.set(local.x, local.y, local.z);
+      mesh.rotation.set(0, THREE.MathUtils.degToRad(-rotation), 0);
+      
+      const s = getAutoCalibrationScale(mesh, ASSET_MAX_DIM_M['barrier']) * visibilityMultiplier;
+      mesh.scale.set(s, s, s);
+
+      mesh.traverse(child => {
+        child.frustumCulled = false;
+        child.userData = Object.assign(child.userData || {}, { assetId: id, type });
+      });
+      mesh.userData = Object.assign(mesh.userData || {}, { assetId: id, type });
+      scene.add(mesh);
+      objects[id] = { mesh, data: asset };
+      return;
+    }
+
+    // --- NON-PROCEDURAL ASSETS: use GLB model from meshCache ---
     const modelType = type;
     const isModelLoaded = !!meshCache[modelType];
     const meshSource = meshCache[modelType] || makeFallbackMesh(modelType);
@@ -633,15 +845,82 @@ const TYPE_PRIORITY = { truck: 3, barrier: 2, sign: 2, light: 2, cone: 1, superv
   const ndcMouse = new THREE.Vector2();
 
   function handleClick(e) {
-    if (!renderer || !camera) return false;
-    const rect = map.getCanvas().getBoundingClientRect();
-    ndcMouse.x = ((e.point.x - rect.left) / rect.width) * 2 - 1;
-    ndcMouse.y = -((e.point.y - rect.top) / rect.height) * 2 + 1;
-    raycaster.setFromCamera(ndcMouse, camera);
-    const hits = raycaster.intersectObjects(scene.children, true);
-    if (!hits.length) return false;
-    const assetId = hits[0].object.userData?.assetId;
-    if (assetId) { onDeleteAsset?.(assetId); return true; }
+    if (!renderer || !camera || !map) return false;
+    
+    let assetId = null;
+
+    // --- 1. PRIMARY: 3D Raycasting ---
+    try {
+      if (!originLngLat) ensureOrigin();
+      // Rebuild MVP matrix for accuracy
+      const projMatrix = new THREE.Matrix4().fromArray(map.transform.projectionMatrix);
+      const modelMatrix = new THREE.Matrix4().fromArray(
+        map.transform.getMatrixForModel([originLngLat.lng, originLngLat.lat], 0)
+      );
+      camera.projectionMatrix.copy(projMatrix.multiply(modelMatrix));
+      camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+
+      const canvas = map.getCanvas();
+      ndcMouse.x = (e.point.x / canvas.clientWidth) * 2 - 1;
+      ndcMouse.y = -(e.point.y / canvas.clientHeight) * 2 + 1;
+
+      raycaster.setFromCamera(ndcMouse, camera);
+      const hits = raycaster.intersectObjects(scene.children, true);
+      
+      if (hits.length > 0) {
+        for (const hit of hits) {
+          let obj = hit.object;
+          while (obj) {
+            if (obj.userData?.assetId) {
+              assetId = obj.userData.assetId;
+              break;
+            }
+            obj = obj.parent;
+          }
+          if (assetId) break;
+        }
+      }
+    } catch (err) {
+      console.warn('[3D] Raycast failed, using fallback:', err);
+    }
+
+    // --- 2. SECONDARY: Distance-based Fallback (Bulletproof) ---
+    if (!assetId) {
+      const clickLng = e.lngLat.lng;
+      const clickLat = e.lngLat.lat;
+      let closestId = null;
+      let minDistance = 5.0; // 5 metre radius for deletion "hitbox"
+
+      (currentData.zones || []).forEach(zone => {
+        (zone.placedAssets || []).forEach(asset => {
+          // Fast check: roughly 10m box
+          const dLng = Math.abs(asset.lng - clickLng);
+          const dLat = Math.abs(asset.lat - clickLat);
+          if (dLng < 0.0001 && dLat < 0.0001) {
+            // Simple Euclidean distance in metres (approximate but effective)
+            const dx = (asset.lng - clickLng) * 111320 * Math.cos(clickLat * Math.PI / 180);
+            const dy = (asset.lat - clickLat) * 111320;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            
+            if (dist < minDistance) {
+              minDistance = dist;
+              closestId = asset.id;
+            }
+          }
+        });
+      });
+      if (closestId) {
+        assetId = closestId;
+        console.log(`[3D] Asset identified via Distance Fallback (${minDistance.toFixed(1)}m): ${assetId}`);
+      }
+    }
+
+    if (assetId) {
+      console.log(`%c[3D] DELETE ASSET: ${assetId}`, 'color: #ef4444; font-weight: bold;');
+      onDeleteAsset?.(assetId);
+      return true;
+    }
+    
     return false;
   }
 
@@ -657,7 +936,7 @@ const TYPE_PRIORITY = { truck: 3, barrier: 2, sign: 2, light: 2, cone: 1, superv
 
       scene.add(new THREE.AmbientLight(0xffffff, 1.2));
       const sun = new THREE.DirectionalLight(0xffffff, 1.5);
-      sun.position.set(0.5, -0.707, 0.5).normalize();
+      sun.position.set(0.5, 0.707, 0.5).normalize(); // Points DOWN towards origin
       scene.add(sun);
 
       renderer = new THREE.WebGLRenderer({
@@ -670,9 +949,18 @@ const TYPE_PRIORITY = { truck: 3, barrier: 2, sign: 2, light: 2, cone: 1, superv
 
       ensureOrigin(currentData);
 
+      // FIX: After ALL models load, re-sync with whatever data is current
+      // at that point — not just what was passed at layer init time.
+      // This fixes assets not showing on landing page when zones already
+      // have placedAssets before the layer mounts.
       Promise.all(Object.values(modelLoads)).then(() => {
+        console.log('[3D] All models loaded. Syncing scene with current data...');
         syncScene(currentData);
         mapRef.triggerRepaint();
+        // Trigger a second repaint 500ms later to catch any timing edge cases
+        setTimeout(() => {
+          if (scene) { syncScene(currentData); mapRef.triggerRepaint(); }
+        }, 500);
       });
     },
 
@@ -721,7 +1009,20 @@ const TYPE_PRIORITY = { truck: 3, barrier: 2, sign: 2, light: 2, cone: 1, superv
 
     setData(data) {
       currentData = data;
-      if (scene) { syncScene(data); map.triggerRepaint(); }
+      if (!scene) return; // layer not mounted yet — currentData will be used when onAdd fires
+
+      const allLoaded = Object.values(meshCache).length === Object.keys(ASSET_MODELS).length;
+      if (allLoaded) {
+        // Models ready — sync immediately
+        syncScene(data);
+        map.triggerRepaint();
+      } else {
+        // Models still loading — wait for them then sync with latest data
+        Promise.all(Object.values(modelLoads)).then(() => {
+          syncScene(currentData); // use currentData (latest) not stale closure
+          map.triggerRepaint();
+        });
+      }
     },
 
     handleClick,

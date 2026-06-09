@@ -115,7 +115,8 @@ const MapArea = ({
   const [draftCoords, setDraftCoords] = useState([]);
   const draftCoordsRef = useRef([]);
   const snapPromisesRef = useRef([]);
-  const [roadCollection, setRoadCollection] = useState(null);
+  const roadCollection = useStore(state => state.roadCollection);
+  const setRoadCollection = useStore(state => state.setRoadCollection);
   const lastFetchRef = useRef(null);
   const [firstStyleLayerId, setFirstStyleLayerId] = useState(null);
   const [clickPing, setClickPing] = useState(null);
@@ -130,8 +131,8 @@ const MapArea = ({
     const features = [];
     zones.forEach(z => {
       (z.placedAssets || []).forEach(a => {
-        const char = a.type === 'truck' ? 'T' : a.type === 'cone' ? 'C' : a.type === 'barrier' ? 'B' : 'S';
-        const color = a.type === 'truck' ? '#10b981' : a.type === 'cone' ? '#f59e0b' : a.type === 'barrier' ? '#ef4444' : '#0ea5e9';
+        const char = a.type === 'truck' ? 'T' : a.type === 'cone' ? 'C' : a.type === 'barrier' ? 'B' : a.type === 'boomgate' ? 'G' : 'S';
+        const color = a.type === 'truck' ? '#10b981' : a.type === 'cone' ? '#f59e0b' : a.type === 'barrier' ? '#f97316' : a.type === 'boomgate' ? '#ef4444' : '#0ea5e9';
         features.push({
           type: 'Feature',
           geometry: { type: 'Point', coordinates: [a.lng, a.lat] },
@@ -514,20 +515,26 @@ const MapArea = ({
       if (dist < 400) return roadCollection;
     }
     const roads = await fetchRoadVectors(lat, lng, 600);
-    if (roads?.features?.length) { useStore.getState().setRoadCollection(roads); lastFetchRef.current = { lat, lng }; return roads; }
+    if (roads?.features?.length) { 
+      setRoadCollection(roads);
+      lastFetchRef.current = { lat, lng }; 
+      return roads; 
+    }
     return roadCollection;
-  }, [isSnapEnabled, roadCollection]);
+  }, [isSnapEnabled, roadCollection, setRoadCollection]);
 
   const maybeSnapPoint = useCallback(async ({ lat, lng }) => {
     if (!isSnapEnabled) return { lat, lng };
     const roads = await ensureRoadsNear(lat, lng);
     const snapped = snapToRoads([lat, lng], roads, 18);
-    if (snapped) return { lat: snapped.point[0], lng: snapped.point[1], road: snapped.road, line: snapped.line, location: snapped.location };
-    return { lat, lng };
+    if (snapped) return { ...snapped, lat: snapped.point[0], lng: snapped.point[1], _roads: roads };
+    return { lat, lng, _roads: roads };
   }, [ensureRoadsNear, isSnapEnabled]);
 
   const handleMapClick = useCallback(async (e) => {
-    if (!activeTool && trafficLayerRef.current?.handleClick?.(e)) return;
+    // Universal Left-Click Management: Prioritize Deletion
+    if (trafficLayerRef.current?.handleClick?.(e)) return;
+
     const rawPoint = { lng: e.lngLat.lng, lat: e.lngLat.lat };
     setClickPing(rawPoint);
     setTimeout(() => setClickPing(prev => prev?.lng === rawPoint.lng ? null : prev), 800);
@@ -548,6 +555,8 @@ const MapArea = ({
       if (actualIdx !== -1) {
         let insertedPoints = [{ ...snapped, snapped: snapped.lat !== rawPoint.lat }];
         let routeFound = false;
+        const currentRoads = snapped._roads || roadCollection;
+        
         if (actualIdx > 0 && isSnapEnabled && activeTool !== 'draw-rectangle') {
           const prevPt = draftCoordsRef.current[actualIdx - 1];
           if (prevPt.line && snapped.line && (prevPt.line.properties?.id || prevPt.line.id) === (snapped.line.properties?.id || snapped.line.id)) {
@@ -562,9 +571,9 @@ const MapArea = ({
               }
             } catch (_) {}
           }
-          if (!routeFound && roadCollection) {
+          if (!routeFound && currentRoads) {
             try {
-              const routeCoords = findPathInNetwork([prevPt.lng, prevPt.lat], [snapped.lng, snapped.lat], roadCollection);
+              const routeCoords = findPathInNetwork([prevPt.lng, prevPt.lat], [snapped.lng, snapped.lat], currentRoads);
               if (routeCoords && routeCoords.length > 1) {
                 insertedPoints = routeCoords.slice(1).map(c => ({ lat: c[1], lng: c[0], snapped: true, road: snapped.road, isAutoPoint: true }));
                 insertedPoints[insertedPoints.length - 1] = { ...snapped, snapped: true };
@@ -623,6 +632,7 @@ const MapArea = ({
       const isAssetTool = activeTool && (
         activeTool === 'cone' || 
         activeTool === 'barrier' || 
+        activeTool === 'boomgate' || 
         activeTool === 'truck' || 
         activeTool === 'light' || 
         activeTool === 'flagger' || 
@@ -639,7 +649,7 @@ const MapArea = ({
       pushUndo();
       addPlacedAsset(targetZoneId, { id: `asset-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, type: activeTool, lat: snappedData.lat, lng: snappedData.lng, rotation: rot });
     }
-  }, [activeTool, maybeSnapPoint, onSelectZone, addPlacedAsset, pushUndo, zones, activeZoneId, onUpdatePointCount, setActiveTool, onShapeDrawn, roadCollection]);
+  }, [activeTool, maybeSnapPoint, onSelectZone, addPlacedAsset, pushUndo, zones, activeZoneId, onUpdatePointCount, setActiveTool, onShapeDrawn, roadCollection, isSnapEnabled]);
 
   const handleMouseMove = useCallback((e) => {
     if (!activeTool?.startsWith('draw-') || !mapRef.current) return;
@@ -695,7 +705,16 @@ const MapArea = ({
 
   useEffect(() => {
     trafficDataRef.current = { zones, activeZoneId };
-    if (trafficLayerRef.current?.setData) trafficLayerRef.current.setData({ zones, activeZoneId });
+    if (trafficLayerRef.current?.setData) {
+      trafficLayerRef.current.setData({ zones, activeZoneId });
+    } else {
+      const retry = setTimeout(() => {
+        if (trafficLayerRef.current?.setData) {
+          trafficLayerRef.current.setData(trafficDataRef.current);
+        }
+      }, 1500);
+      return () => clearTimeout(retry);
+    }
   }, [zones, activeZoneId]);
 
   useEffect(() => {
